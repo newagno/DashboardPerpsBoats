@@ -1,0 +1,169 @@
+:root {
+    --bg-color: #0a0e27;
+    --card-bg: rgba(26, 30, 63, 0.7);
+    --card-border: rgba(255, 255, 255, 0.1);
+    --accent-color: #667eea;
+    --accent-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --text-primary: #f0f0f0;
+    --text-secondary: #a0a0c0;
+    --success-color: #51cf66;
+    --danger-color: #ff6b6b;
+    --container-width: 1200px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    line-height: 1.6;
+    overflow-x: hidden;
+}
+
+/* Видалено h1, h2 з прив'язки до .logo-text, щоб вони не зменшувались разом з ним */
+h1,
+h2,
+h3 {
+    font-family: 'Outfit', sans-serif;
+}
+
+.container {
+    max-width: var(--container-width);
+    margin: 0 auto;
+    padding: 0 24px;
+}
+
+/* Navbar */
+.navbar {
+    height: 80px;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--card-border);
+    backdrop-filter: blur(10px);
+    position: fixed;
+    top: 0;
+    width: 100%;
+    z-index: 1000;
+}
+
+.navbar .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* ФІКСОВАНИЙ ТА ЗМЕНШЕНИЙ ЛОГОТИП */
+.logo-text {
+    font-family: 'IBM Plex Mono', monospace !important;
+    /* Використовуємо display: flex, щоб span став блочним і слухався розмірів */
+    display: inline-flex !important;
+    align-items: center;
+
+    /* Базовий розмір, який дозволяють браузери */
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    line-height: 1;
+    white-space: nowrap;
+
+    /* Жорстке зменшення через scale, якщо 12px забагато */
+    transform: scale(0.85) !important;
+    transform-origin: left center;
+
+    /* Градієнт */
+    background: var(--accent-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* Решта стилів залишається без змін */
+.nav-links {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+}
+
+.nav-links a {
+    text-decoration: none;
+    color: var(--text-primary);
+    font-weight: 500;
+    transition: color 0.3s;
+}
+
+.nav-links a:hover {
+    color: var(--accent-color);
+}
+
+.cta-small {
+    background: var(--accent-gradient);
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: 600 !important;
+    text-decoration: none;
+    color: white;
+}
+
+/* Hero Section */
+.hero {
+    padding: 180px 0 120px;
+    background: radial-gradient(circle at 80% 20%, rgba(102, 126, 234, 0.15) 0%, transparent 60%);
+}
+
+.hero-container {
+    display: flex;
+    align-items: center;
+    gap: 60px;
+}
+
+.hero-title {
+    font-size: 64px;
+    line-height: 1.1;
+    font-weight: 800;
+    margin-bottom: 24px;
+}
+
+.gradient-text {
+    background: var(--accent-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* Медіа-запити для адаптивності */
+@media (max-width: 1024px) {
+    .hero-container {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .hero-title {
+        font-size: 48px;
+    }
+}
+
+@media (max-width: 768px) {
+    .nav-links a:not(.cta-small) {
+        display: none;
+    }
+
+    .hero-title {
+        font-size: 40px;
+    }
+
+    /* На мобільних можна ще трохи зменшити */
+    .logo-text {
+        transform: scale(0.75) !important;
+    }
+}

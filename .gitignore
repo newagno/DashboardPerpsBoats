@@ -1,0 +1,13 @@
+# Секрети та налаштування
+.env
+.env.local
+
+# Залежності
+node_modules/
+
+# Тимчасові файли та бекапи
+backups/
+*.log
+.agents
+.antigravity
+.DS_Store (для macOS)

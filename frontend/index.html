@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Exchange Trading Dashboard | Unified Monitoring</title>
+    <meta name="description" content="Monitor your trades across Extended, Nado, and Variational exchanges in one secure, real-time dashboard.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="logo">
+                <span class="logo-icon">📊</span>
+                <span class="logo-text">TradeDash</span>
+            </div>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="/dashboard" class="cta-small">Launch Dashboard →</a>
+            </div>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="container hero-container">
+            <div class="hero-content">
+                <h1 class="hero-title">Master the Chaos of <span class="gradient-text">Multi-Exchange</span> Trading</h1>
+                <p class="hero-subtitle">The ultimate dashboard for pro traders. Monitor PnL, Win Rate, and Points across Extended, Nado, and Variational in real-time. Secure, encrypted, and blazing fast.</p>
+                <div class="hero-actions">
+                    <button id="btn-login-metamask" class="btn btn-primary" style="display: flex; align-items: center; gap: 10px; justify-content: center;">
+                        <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" alt="MetaMask" style="width: 20px; height: 20px;">
+                        Connect MetaMask →
+                    </button>
+                    <a href="/dashboard" class="btn btn-secondary">Launch with Password</a>
+                </div>
+                <div class="supported-exchanges">
+                    <span>Supporting:</span>
+                    <div class="exchange-logos">
+                        <span class="exchange-tag">Extended (Starknet)</span>
+                        <span class="exchange-tag">Nado (Ink L2)</span>
+                        <span class="exchange-tag">Variational (Arbitrum)</span>
+                    </div>
+                </div>
+            </div>
+            <div class="hero-visual">
+                <div class="dashboard-preview">
+                    <!-- Dashboard preview illustration or image -->
+                    <div class="card-mockup main-stats">
+                        <div class="mock-line"></div>
+                        <div class="mock-grid">
+                            <div class="mock-stat"></div>
+                            <div class="mock-stat"></div>
+                        </div>
+                    </div>
+                    <div class="card-mockup side-stats">
+                        <div class="mock-circle"></div>
+                        <div class="mock-line-short"></div>
+                    </div>
+                    <div class="card-mockup extra-mock"></div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <section id="features" class="features">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Everything You Need to Scale</h2>
+                <p class="section-subtitle">A professional toolset designed for the modern decentralized trader.</p>
+            </div>
+            
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">⛓️</div>
+                    <h3 class="feature-name">Multi-Exchange</h3>
+                    <p class="feature-desc">Connect and monitor Extended, Nado, and Variational accounts simultaneously from a single tab.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔒</div>
+                    <h3 class="feature-name">AES-256 Encryption</h3>
+                    <p class="feature-desc">Your API keys never leave your browser. They are encrypted locally using industrial-grade AES-256 standards.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3 class="feature-name">Real-Time Monitoring</h3>
+                    <p class="feature-desc">Stay updated with 5-minute auto-polling and instant manual refresh. Never miss a market move.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">💹</div>
+                    <h3 class="feature-name">Advanced Metrics</h3>
+                    <p class="feature-desc">Track Total Deposit, Unrealized PnL, Win Rate %, and Loyalty Points across all your subaccounts.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📱</div>
+                    <h3 class="feature-name">Mobile Optimized</h3>
+                    <p class="feature-desc">Monitor your positions on the go. Perfectly responsive layout for smartphones and tablets.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3 class="feature-name">Visual Insights</h3>
+                    <p class="feature-desc">Clear, intuitive cards and summary headers designed for high-signal, low-noise monitoring.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <div class="logo">
+                        <span class="logo-icon">📊</span>
+                        <span class="logo-text">TradeDash</span>
+                    </div>
+                    <p class="footer-tagline">Pro Monitoring for DEX Perpetuals.</p>
+                </div>
+                <div class="footer-copy">
+                    &copy; 2026 Multi-Exchange Trading Dashboard. All rights reserved.
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        document.getElementById('btn-login-metamask').addEventListener('click', async () => {
+            if (typeof window.ethereum !== 'undefined') {
+                try {
+                    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    if (accounts.length > 0) {
+                        window.location.href = '/dashboard?login=metamask';
+                    }
+                } catch (e) {
+                    console.error('MetaMask login failed:', e);
+                }
+            } else {
+                alert('Please install MetaMask to use this feature.');
+            }
+        });
+    </script>
+</body>
+</html>

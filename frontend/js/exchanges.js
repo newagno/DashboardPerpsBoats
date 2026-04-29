@@ -1,5 +1,6 @@
 /**
- * Base Exchange class defining the interface and common logic.
+ * Exchange API classes — each sends walletAddress in the request body
+ * so the backend can route multi-wallet requests correctly.
  */
 class BaseExchange {
     constructor(exchangeName) {
@@ -12,7 +13,7 @@ class BaseExchange {
             const response = await fetch(url, options);
             if (!response.ok) {
                 const errData = await response.json().catch(() => ({}));
-                throw new Error(errData.error || `HTTP error! status: ${response.status}`);
+                throw new Error(errData.error || `HTTP ${response.status}`);
             }
             return await response.json();
         } catch (error) {
@@ -22,9 +23,6 @@ class BaseExchange {
     }
 }
 
-/**
- * Extended Exchange (Starknet)
- */
 class ExtendedExchange extends BaseExchange {
     constructor(apiKey) {
         super('Extended');
@@ -40,51 +38,42 @@ class ExtendedExchange extends BaseExchange {
     }
 }
 
-/**
- * Nado Exchange (Ink L2)
- */
 class NadoExchange extends BaseExchange {
-    constructor(address, signature) {
+    constructor(walletAddress) {
         super('Nado');
-        this.address = address;
-        this.signature = signature;
+        this.walletAddress = walletAddress;
     }
 
     async getStats() {
         return this.fetchData(`${this.PROXY_BASE}/nado/stats`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                address: this.address,
-                signature: this.signature 
+            body: JSON.stringify({
+                address: window.walletManager.state.address,
+                walletAddress: this.walletAddress  // specific wallet for multi-wallet support
             })
         });
     }
 }
 
-/**
- * Variational Exchange (Arbitrum)
- */
 class VariationalExchange extends BaseExchange {
-    constructor(address, signature) {
+    constructor(walletAddress) {
         super('Variational');
-        this.address = address;
-        this.signature = signature;
+        this.walletAddress = walletAddress;
     }
 
     async getStats() {
-        // Variational proxy updated to POST to support signatures
         return this.fetchData(`${this.PROXY_BASE}/variational/stats`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                address: this.address,
-                signature: this.signature 
+            credentials: 'include',
+            body: JSON.stringify({
+                address: window.walletManager.state.address,
+                walletAddress: this.walletAddress  // specific wallet for multi-wallet support
             })
         });
     }
 }
-
 
 window.Exchanges = {
     Extended: ExtendedExchange,

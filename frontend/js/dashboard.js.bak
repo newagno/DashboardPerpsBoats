@@ -48,7 +48,6 @@ class DashboardManager {
             const v = e.target.value;
             this.extendedConfigGroup.style.display = v === 'extended' ? 'block' : 'none';
             document.getElementById('variational-config-group').style.display = v === 'variational' ? 'block' : 'none';
-            // Show multi-wallet group for any selected exchange
             document.getElementById('multi-wallet-group').style.display = v ? 'block' : 'none';
         });
 
@@ -67,11 +66,13 @@ class DashboardManager {
                 const inputAddr = document.getElementById('wallet-address-input')?.value.trim() || null;
                 const walletAddr = inputAddr || null;
 
-                // Force user to input an address manually if they don't have a session
-                if (!walletAddr && !window.walletManager.state.address) {
-                    alert('Please enter a wallet address for this exchange.');
-                    this.btnSaveExchange.innerHTML = 'Save Exchange';
-                    return;
+                // If no wallet address is provided and it's not extended, force AppKit login
+                if (!walletAddr && exc !== 'extended' && !window.walletManager.state.address) {
+                    if (await window.walletManager.connectMetaMask()) {
+                        await window.walletManager.loginToBackend();
+                    } else {
+                        throw new Error('Wallet connection failed');
+                    }
                 }
                 
                 const result = window.walletManager.addExchange(exc, walletAddr, label);
@@ -158,20 +159,19 @@ class DashboardManager {
         const card = document.createElement('div');
         card.className = 'wallet-card';
         const { id, exchange: exc, walletAddress, label } = res;
-        const excName = exc.charAt(0).toUpperCase() + exc.slice(1);
+        const displayName = label || exc.charAt(0).toUpperCase() + exc.slice(1);
         const displayAddr = walletAddress || window.walletManager.state.address || '';
         const addrShort = window.Utils.truncateAddress(displayAddr);
-        let logoName = exc === 'nado' ? 'nado' : excName.toLowerCase();
 
         if (!res.success) {
+            let logoName = exc === 'nado' ? 'nado' : displayName;
             card.innerHTML = `
                 <div class="card-header">
                     <div>
                         <span class="exchange-badge">
-                            <img src="assets/${logoName}.png" alt="${excName}" style="height:1em;width:auto;vertical-align:middle;margin-right:6px;">${excName}
+                            <img src="assets/${logoName}.png" alt="${displayName}" style="height:1em;width:auto;vertical-align:middle;margin-right:6px;">${displayName}
                         </span>
                         <span class="wallet-address-truncated">ID: ${addrShort}</span>
-                        ${label ? `<div style="font-size:0.75em;color:#4ade80;margin-top:2px;">${label}</div>` : ''}
                     </div>
                 </div>
                 <div class="empty-state" style="padding:20px;font-size:0.8em;color:#ff6b6b;">
@@ -184,6 +184,7 @@ class DashboardManager {
         }
 
         const data = this.walletData[id] || {};
+        let logoName = exc === 'nado' ? 'nado' : displayName;
         const securityStatus = exc === 'extended' ? 'API_KEY_AUTH (Tab-Only)' : 'WEB3_SESSION (Secure Cookie)';
         const pnlClass = (data.pnl || 0) >= 0 ? 'positive' : 'negative';
         const roiClass = (data.roi || 0) >= 0 ? 'positive' : 'negative';
@@ -193,10 +194,9 @@ class DashboardManager {
             <div class="card-header">
                 <div>
                     <span class="exchange-badge">
-                        <img src="assets/${logoName}.png" alt="${excName}" style="height:1em;width:auto;vertical-align:middle;margin-right:6px;display:inline-block;">${excName}
+                        <img src="assets/${logoName}.png" alt="${displayName}" style="height:1em;width:auto;vertical-align:middle;margin-right:6px;display:inline-block;">${displayName}
                     </span>
                     <span class="wallet-address-truncated" title="${displayAddr}">ID: ${addrShort}</span>
-                    ${label ? `<div style="font-size:0.75em;color:#4ade80;margin-top:2px;">${label}</div>` : ''}
                 </div>
                 <button class="btn-secondary" style="font-size:0.7em;border-color:rgba(255,107,107,0.4);color:#ff6b6b;" onclick="window.dashboardMgr.removeWallet('${id}')">X</button>
             </div>
@@ -271,10 +271,9 @@ class DashboardManager {
             d.rank        = rawData.rank          || null;
 
             // POINTS: sum all epochRewards across all seasons
-            // Backend now sends full points API response: { data: [ { epochRewards: [{ pointsReward }] } ] }
+            // Docs: GET /api/v1/user/rewards/earned → data[].epochRewards[].pointsReward
             let totalPoints = 0;
-            const pointsPayload = rawData.points || {};
-            const pointsData = pointsPayload.data || [];
+            const pointsData = rawData.points?.data || [];
             if (Array.isArray(pointsData)) {
                 pointsData.forEach(season => {
                     (season.epochRewards || []).forEach(ep => {
@@ -344,15 +343,11 @@ class DashboardManager {
 
         // Update summary cards in header
         const avgWinRate = activeCount > 0 ? totalWinRate / activeCount : 0;
-        // PNL % of total initial deposit
-        const pnlPct = totalInitDeposit > 0 ? (totalPnL / totalInitDeposit) * 100 : 0;
 
         const el = (id) => document.getElementById(id);
-        // 01 // initianal_DEPOSIT = sum of all initDeposit across all wallets/exchanges
-        if (el('total-deposit'))  el('total-deposit').textContent  = window.Utils.formatCurrency(totalInitDeposit);
+        if (el('total-deposit'))  el('total-deposit').textContent  = window.Utils.formatCurrency(totalActDeposit);
         if (el('total-pnl')) {
-            const pnlSign = pnlPct >= 0 ? '+' : '';
-            el('total-pnl').textContent  = `${window.Utils.formatCurrency(totalPnL)} (${pnlSign}${pnlPct.toFixed(2)}%)`;
+            el('total-pnl').textContent  = window.Utils.formatCurrency(totalPnL);
             el('total-pnl').className    = `value ${totalPnL >= 0 ? 'positive' : 'negative'}`;
         }
         if (el('total-win-rate')) el('total-win-rate').textContent = window.Utils.formatPercent(avgWinRate);

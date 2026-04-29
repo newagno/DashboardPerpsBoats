@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trading Dashboard | Multi-Exchange</title>
+    <title>Trading Dashboard | Secure Monitoring</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
@@ -15,24 +15,28 @@
         <header class="dash-header">
             <div class="logo">
                 <img src="assets/key.png" alt="Key" class="logo-key-icon" id="draggable-key" draggable="true">
-                <span class="logo-text">Incrypted+</span>
+                <span class="logo-text">TradeDash Secure</span>
             </div>
-            <div class="header-actions">
+            <div class="header-actions" style="display: flex; gap: 15px; align-items: center;">
                 <span id="last-update" class="timestamp">UTC / ${new Date().toISOString().slice(0,10)}</span>
+                
                 <div class="chest-container" id="treasure-chest">
                     <img src="assets/chest.png" alt="VAULT" class="chest-icon">
                 </div>
-                <button id="add-wallet-btn" class="btn-icon-text">
-                    [ + ] LINK_WALLET
-                </button>
-                <button id="btn-risk-advisor" class="btn-icon-text" style="color: var(--colors-token-green, #4CAF50); margin-left: 8px;">
-                    [ ⚡ ] RISK_ADVISOR
+                
+                <div id="wallet-auth-container" style="display: flex; gap: 10px;">
+                    <button id="btn-login-metamask" class="btn-primary" style="display: flex; align-items: center; gap: 8px; display: none;">
+                        <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" alt="MetaMask" style="width: 16px; height: 16px;">
+                        Connect & Authenticate
+                    </button>
+                    <button id="btn-disconnect" class="btn-secondary" style="display: none;">Disconnect</button>
+                </div>
+
+                <button id="btn-add-exchange" class="btn-icon-text">
+                    [ + ] ADD_EXCHANGE
                 </button>
                 <button id="refresh-btn" class="btn-icon">
                     REF
-                </button>
-                <button id="lock-vault-btn" class="btn-icon" title="Lock Data Vault" style="display: none;">
-                    🔒
                 </button>
             </div>
         </header>
@@ -41,7 +45,7 @@
             <!-- Summary Section -->
             <section class="summary-grid">
                 <div class="summary-card">
-                    <span class="label">01 // AGGREGATE_DEPOSIT</span>
+                    <span class="label">01 // INITIANAL_DEPOSIT</span>
                     <span id="total-deposit" class="value">$0.00</span>
                 </div>
                 <div class="summary-card">
@@ -53,11 +57,15 @@
                     <span id="total-win-rate" class="value">0%</span>
                 </div>
                 <div class="summary-card">
-                    <span class="label">04 // TOTAL_TURNOVER</span>
+                    <span class="label">04 // TOTAL_VOLUME</span>
                     <span id="total-volume" class="value">$0.00</span>
                 </div>
             </section>
 
+            <!-- Warnings -->
+            <div class="security-notice" style="background: rgba(76, 175, 80, 0.1); border-left: 4px solid var(--colors-token-green, #4CAF50); padding: 10px; margin-bottom: 20px; font-size: 0.85em;">
+                <strong>SECURITY NOTICE:</strong> We do not ask for or store your private keys. Authorization is handled via secure EIP-712 Web3 signatures and server-side stateful cookies.
+            </div>
 
             <!-- Wallets Grid -->
             <section class="wallets-section">
@@ -65,108 +73,81 @@
                     <h2>ACTIVE / TELEMETRY_STREAMS</h2>
                 </div>
                 <div id="wallets-container" class="wallets-grid">
-                    <!-- Wallet cards will be injected here -->
+                    <!-- Default Empty State -->
                     <div class="empty-state">
-                        <p>NO DATA FEED DETECTED. CLICK "LINK_WALLET" TO INITIALIZE.</p>
+                        <p>NO ACTIVE EXCHANGE CONFIGURED. CLICK "ADD_EXCHANGE" TO INITIALIZE.</p>
                     </div>
                 </div>
             </section>
         </main>
     </div>
 
-    <!-- Add Wallet Modal -->
-    <div id="modal-add-wallet" class="modal" style="display: none;">
-        <div class="modal-content">
+    <!-- Add Exchange Config Modal -->
+    <div id="modal-add-exchange" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 450px;">
             <div class="modal-header">
-                <h3>INITIATE / WALLET_LINK</h3>
-                <button class="close-modal">ESC</button>
+                <h3>MODULE / LINK_EXCHANGE</h3>
+                <button type="button" class="close-modal btn-close-modal">ESC</button>
             </div>
-            <form id="form-add-wallet">
-                <input type="hidden" id="edit-index" value="-1">
-                <div class="form-group">
-                    <label for="exchange-select">Exchange</label>
-                    <select id="exchange-select" required>
-                        <option value="" disabled selected>Select Exchange</option>
-                        <option value="extended">Extended Exchange (Starknet)</option>
-                        <option value="nado">Nado (Ink L2)</option>
-                        <option value="variational">Variational (Arbitrum)</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="wallet-address">Wallet Address</label>
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                        <input type="text" id="wallet-address" placeholder="0x..." required style="flex: 1;">
-                        <button type="button" id="btn-connect-metamask" class="btn-secondary" style="padding: 0 16px; white-space: nowrap;">
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" alt="MetaMask" style="width: 16px; height: 16px; display: inline-block; vertical-align: middle; margin-right: 4px;">
-                            Connect MetaMask
+            <div class="modal-body" style="padding: 20px 0;">
+                <form id="form-add-exchange" autocomplete="off" onsubmit="event.preventDefault(); return false;">
+                    
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <label for="exchange-select">Select Exchange Platform</label>
+                        <select id="exchange-select" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                            <option value="" disabled selected>Select Exchange</option>
+                            <option value="extended">Extended Exchange (Starknet)</option>
+                            <option value="nado">Nado (Ink L2)</option>
+                            <option value="variational">Variational (Arbitrum)</option>
+                        </select>
+                    </div>
+
+                    <div id="extended-config-group" style="display: none; margin-bottom: 15px;">
+                        <p style="font-size: 0.8em; color: var(--text-muted, #94a3b8); margin-bottom: 10px;">
+                            Extended requires a Read-Only API Key. This key is <strong>never stored</strong> in localStorage or the server. Persists only in tab memory.
+                        </p>
+                        <label for="extended-api-key">Tab-Only Read-Only API Key</label>
+                        <input type="password" id="extended-api-key" placeholder="Paste your API key here" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                    </div>
+
+                    <div id="variational-config-group" style="display: none; margin-bottom: 15px;">
+                        <p style="font-size: 0.8em; color: var(--text-muted, #94a3b8); margin-bottom: 10px;">
+                            Variational requires an active session token if you are not authenticated in this browser. Paste your <strong>vr-token</strong> cookie value below. It is stored only in tab memory.
+                        </p>
+                        <label for="variational-token">Tab-Only vr-token</label>
+                        <input type="password" id="variational-token" placeholder="Paste your vr-token cookie value here" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                    </div>
+
+                    <div id="multi-wallet-group" style="display: none; margin-bottom: 15px;">
+                        <p style="font-size: 0.8em; color: var(--text-muted, #94a3b8); margin-bottom: 10px;">
+                            To add a different wallet address for this exchange, paste it below. Leave blank to use your connected wallet.
+                        </p>
+                        <label for="wallet-address-input">Wallet Address</label>
+                        <input type="text" id="wallet-address-input" placeholder="0x..." autocomplete="off" style="width: 100%; padding: 10px; margin-bottom: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                        <label for="wallet-label-input">Label</label>
+                        <input type="text" id="wallet-label-input" placeholder="e.g. Nado Main, Trading Wallet" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                    </div>
+
+                    <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+                        <button type="button" class="btn-secondary btn-close-modal">Cancel</button>
+                        <button type="button" id="btn-save-exchange" class="btn-primary" style="display: flex; gap: 8px; align-items: center;">
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" alt="MetaMask" style="width: 16px; height: 16px;">
+                            Add & Authenticate
                         </button>
                     </div>
-                    <small id="metamask-notice" style="color: var(--colors-token-green, #4CAF50); display: none; margin-top: 6px;">
-                        ✓ READ-ONLY ACCESS: This site only reads your public address and has NO access to your funds or transactions.
-                    </small>
-                </div>
-                
-                <!-- Authenticated Session Section -->
-                <div id="auth-session-group" class="form-group" style="display: none; border: 1px dashed var(--border-color); padding: 15px; background: rgba(0,0,0,0.2);">
-                    <label style="color: var(--accent-red);">Web3 Session Authentication</label>
-                    <p style="font-size: 0.8em; color: #888; margin-bottom: 12px;">To fetch private PnL and Points, you must sign a verification message with MetaMask. <strong>No private keys are shared.</strong></p>
-                    <button type="button" id="btn-authorize-session" class="btn-primary" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;">
-                        🔒 AUTHORIZE_SESSION (SIGN_MESSAGE)
-                    </button>
-                    <input type="hidden" id="session-signature">
-                    <div id="session-status" style="display: none; color: var(--accent-green); font-size: 0.8em; margin-top: 8px; text-align: center;">
-                        ✓ SESSION_AUTHORIZED
-                    </div>
-                </div>
-
-                <div class="form-group" id="api-key-group" style="display: none;">
-                    <label for="api-key">Read-Only API Key</label>
-                    <input type="password" id="api-key" placeholder="Enter your API Key">
-                    <small>Required for Extended Exchange. Encrypted locally.</small>
-                </div>
-                <div class="form-group">
-                    <label for="wallet-description">Description (Optional)</label>
-                    <input type="text" id="wallet-description" placeholder="e.g. Main Trading Wallet">
-                </div>
-                <div class="form-group">
-                    <label for="private-key" style="color: var(--accent-red);">Private Key (Optional // Encrypted)</label>
-                    <input type="password" id="private-key" placeholder="Enter private key for automated actions">
-                    <small style="color: #666;">Stored locally in your encrypted vault. Never shared.</small>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn-secondary close-modal">Cancel</button>
-                    <button type="submit" class="btn-primary">Add Wallet</button>
-                </div>
-            </form>
+                </form>
+            </div>
         </div>
     </div>
 
-    <!-- Vault Authentication Modal -->
-    <div id="modal-vault-auth" class="modal" style="display: none; z-index: 10001; background: rgba(0, 0, 0, 0.95);">
-        <div class="modal-content" style="max-width: 400px; border: 2px solid var(--accent-green); box-shadow: 0 0 40px rgba(74, 246, 38, 0.1);">
-            <div class="modal-header">
-                <h3 id="vault-title">SECURE_VAULT / AUTH</h3>
-            </div>
-            <div class="modal-body" style="padding: 20px 0;">
-                <p id="vault-msg" style="font-size: 0.9em; margin-bottom: 20px; color: #aaa;">ENTER MASTER PASSWORD TO DECRYPT YOUR DATA STREAM.</p>
-                <div class="form-group">
-                    <input type="password" id="vault-password" placeholder="••••••••" required 
-                           style="background: #000; border: 1px solid #333; height: 50px; font-size: 1.5em; text-align: center; letter-spacing: 5px;">
-                </div>
-                <div id="vault-error" style="color: var(--accent-red); font-size: 0.8em; margin-top: 10px; display: none; text-align: center;">
-                    [ ERROR ] INVALID_PASSWORD // ACCESS_DENIED
-                </div>
-            </div>
-            <div class="modal-footer" style="padding: 0; margin-top: 20px; display: flex; flex-direction: column; gap: 10px;">
-                <button type="button" id="btn-unlock-vault" class="btn-primary" style="width: 100%; height: 50px;">UNLOCK_SYSTEM</button>
-                <div style="text-align: center; color: #555; font-size: 0.8em; margin: 5px 0;">— OR —</div>
-                <button type="button" id="btn-unlock-metamask" class="btn-secondary" style="width: 100%; height: 50px; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" alt="MetaMask" style="width: 20px; height: 20px;">
-                    UNLOCK_WITH_METAMASK
-                </button>
-            </div>
-            <div id="vault-init-notice" style="font-size: 0.7em; margin-top: 15px; color: #666; display: none; text-align: center;">
-                * This password will be used to encrypt all signatures locally. It is NEVER sent to any server. Lost passwords cannot be recovered.
+    <!-- Easter Egg Success Popup -->
+    <div id="easter-egg-modal" class="modal" style="display: none;">
+        <div class="modal-content success-content">
+            <div class="success-icon" style="text-align: center; font-size: 2em; margin-bottom: 15px;">🔓 ACCESS_GRANTED</div>
+            <h2 class="outfit" style="text-align: center; color: var(--colors-token-green, #4CAF50);">DECLASSIFIED_INTEL</h2>
+            <p style="text-align: center; margin: 20px 0; color: #fff;">UNIT ID RECOGNIZED. SUBSCRIPTION EXTENSION APPLIED: <strong style="color: var(--colors-token-green, #4CAF50);">+30 DAYS</strong> INCRYPTED+</p>
+            <div class="modal-footer" style="display: flex; justify-content: center;">
+                <button class="btn-primary" onclick="document.getElementById('easter-egg-modal').style.display='none'">ACKNOWLEDGE</button>
             </div>
         </div>
     </div>
@@ -177,61 +158,36 @@
         <p>SYNCHRONIZING / SYSTEM_CORE...</p>
     </div>
 
-    <!-- Easter Egg Success Popup -->
-    <div id="easter-egg-modal" class="modal" style="display: none;">
-        <div class="modal-content success-content">
-            <div class="success-icon">ACCESS_GRANTED</div>
-            <h2 class="outfit">DECLASSIFIED_INTEL</h2>
-            <p>UNIT ID RECOGNIZED. SUBSCRIPTION EXTENSION APPLIED: <strong>+30 DAYS</strong> INCRYPTED+</p>
-            <div class="modal-footer">
-                <button class="btn-primary" onclick="document.getElementById('easter-egg-modal').style.display='none'">ACKNOWLEDGE</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Risk Advisor Modal -->
-    <div id="modal-risk-advisor" class="modal" style="display: none;">
-        <div class="modal-content" style="max-width: 600px;">
-            <div class="modal-header">
-                <h3>STRATEGY / RISK_ADVISOR</h3>
-                <button class="close-modal advisor-close">ESC</button>
-            </div>
-            <div class="advisor-body" style="padding: 10px 0;">
-                <p style="color: var(--text-muted, #94a3b8); margin-bottom: 15px; font-size: 0.9em;">
-                    Optimal parameters for <strong>6 pairs</strong>, max <strong>3 concurrent</strong> positions.
-                </p>
-                <div style="display:flex; justify-content:space-between; margin-bottom:15px; flex-wrap: wrap;">
-                    <div style="margin-bottom: 10px;">
-                        <label style="font-size:0.8em; color:var(--text-muted, #94a3b8); display:block; margin-bottom:4px;">Total Deposit ($)</label>
-                        <input type="number" id="adv-total-depo" value="705.89" style="width:120px; padding:6px; background:var(--bg-main, #0f1117); border:1px solid var(--border-color, #1e222d); color:#fff;">
-                    </div>
-                    <div style="margin-bottom: 10px;">
-                        <label style="font-size:0.8em; color:var(--text-muted, #94a3b8); display:block; margin-bottom:4px;">Mode</label>
-                        <select id="adv-mode" style="padding:6px; background:var(--bg-main, #0f1117); border:1px solid var(--border-color, #1e222d); color:#fff;">
-                            <option value="conservative" selected>🛡 Conservative</option>
-                            <option value="moderate">⚖️ Moderate</option>
-                            <option value="aggressive">🔥 Aggressive</option>
-                        </select>
-                    </div>
-                    <div style="align-self: flex-end; margin-bottom: 10px;">
-                        <button class="btn-primary" id="btn-calc-advisor">CALCULATE</button>
-                    </div>
-                </div>
-
-                <div id="advisor-results" style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 0.85em; line-height: 1.6;">
-                    <!-- Results injected via JS -->
-                    PRESS CALCULATE TO GENERATE MODEL.
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tweetnacl-util@0.15.1/nacl-util.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
-    <script src="js/encryption.js"></script>
+    <script type="module">
+        import { createAppKit } from 'https://esm.run/@reown/appkit'
+        import { EthersAdapter } from 'https://esm.run/@reown/appkit-adapter-ethers'
+        import { mainnet, arbitrum } from 'https://esm.run/@reown/appkit/networks'
 
+        const projectId = '8e391307b22a0129f957df38fc05167a' // Public placeholder
+
+        const metadata = {
+            name: 'TradeDash',
+            description: 'Secure Trading Dashboard',
+            url: 'https://tradedash.io',
+            icons: ['https://avatars.githubusercontent.com/u/37784886']
+        }
+
+        const appKit = createAppKit({
+            adapters: [new EthersAdapter()],
+            networks: [mainnet, arbitrum],
+            metadata,
+            projectId,
+            features: {
+                analytics: true
+            }
+        })
+
+        window.appKit = appKit;
+    </script>
+    <script src="https://cdn.ethers.io/lib/ethers-5.7.umd.min.js"></script>
+    <script src="js/walletManager.js"></script>
     <script src="js/exchanges.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/refreshEngine.js"></script>

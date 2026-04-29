@@ -1,5 +1,6 @@
 /**
- * RefreshEngine handles the periodic polling and manual refreshing of data.
+ * RefreshEngine — periodic polling and manual refresh.
+ * Multi-wallet: iterates over all { id, exchange, walletAddress } entries independently.
  */
 class RefreshEngine {
     constructor() {
@@ -19,56 +20,72 @@ class RefreshEngine {
 
     async refresh() {
         if (this.isRefreshing) return;
-        
+
         console.log('Starting parallel refresh cycle...');
         this.isRefreshing = true;
         this.updateLoadingState(true);
 
-        const wallets = window.cryptoMgr.getWallets();
-        
-        // Map wallets to a list of promises for parallel execution
-        const refreshPromises = wallets.map(async (wallet) => {
+        const sessionAddress = window.walletManager.state.address;
+        if (!sessionAddress) {
+            this.isRefreshing = false;
+            this.updateLoadingState(false);
+            return;
+        }
+
+        const exchangeEntries = window.walletManager.state.activeExchanges;
+
+        if (!exchangeEntries || exchangeEntries.length === 0) {
+            this.isRefreshing = false;
+            this.updateLoadingState(false);
+            window.dashboardMgr.updateAllWalletCards([]);
+            return;
+        }
+
+        // Each entry is { id, exchange, walletAddress, label }
+        const refreshPromises = exchangeEntries.map(async (entry) => {
+            const { id, exchange, walletAddress, label } = entry;
+            // Effective wallet: use entry's walletAddress or fall back to session address
+            const effectiveAddress = walletAddress || sessionAddress;
+
             try {
-                let exchangeObj;
-                const decryptedSignature = wallet.sessionSignature ? window.cryptoMgr.decrypt(wallet.sessionSignature) : null;
-                
-                if (wallet.exchange === 'extended') {
-                    const decryptedKey = window.cryptoMgr.decrypt(wallet.apiKey);
-                    exchangeObj = new window.Exchanges.Extended(decryptedKey);
-                } else if (wallet.exchange === 'nado') {
-                    exchangeObj = new window.Exchanges.Nado(wallet.address, decryptedSignature);
-                } else if (wallet.exchange === 'variational') {
-                    exchangeObj = new window.Exchanges.Variational(wallet.address, decryptedSignature);
+                let data;
+                if (exchange === 'extended') {
+                    const extendedKey = window.walletManager.getExtendedApiKey(id);
+                    if (!extendedKey) return null;
+                    const obj = new window.Exchanges.Extended(extendedKey);
+                    data = await obj.getStats();
+                } else if (exchange === 'nado') {
+                    // Pass walletAddress as 'walletAddress' so server uses that specific address
+                    const obj = new window.Exchanges.Nado(effectiveAddress);
+                    data = await obj.getStats();
+                } else if (exchange === 'variational') {
+                    const vrToken = window.walletManager.getVariationalToken(id);
+                    const obj = new window.Exchanges.Variational(effectiveAddress, vrToken);
+                    data = await obj.getStats();
+                } else {
+                    return null;
                 }
 
-                if (exchangeObj) {
-                    const data = await exchangeObj.getStats();
-                    return { id: wallet.id, exchange: wallet.exchange, data, success: true };
-                }
+                return { id, exchange, walletAddress: effectiveAddress, label, data, success: true };
             } catch (error) {
-                console.error(`Failed to refresh wallet ${wallet.id}:`, error);
-                return { id: wallet.id, exchange: wallet.exchange, error: error.message, success: false };
+                console.error(`Failed to refresh ${exchange} (${effectiveAddress}):`, error);
+                return { id, exchange, walletAddress: effectiveAddress, label, error: error.message, success: false };
             }
-            return null;
         });
 
         const results = (await Promise.all(refreshPromises)).filter(r => r !== null);
 
-        // Update UI
         window.dashboardMgr.updateAllWalletCards(results);
         window.dashboardMgr.updateSummary();
-        
         document.getElementById('last-update').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
-        
+
         this.isRefreshing = false;
         this.updateLoadingState(false);
     }
 
-
     updateLoadingState(loading) {
         const overlay = document.getElementById('loading-overlay');
         const refreshBtn = document.getElementById('refresh-btn');
-        
         if (loading) {
             overlay.style.display = 'flex';
             refreshBtn.classList.add('spinning');

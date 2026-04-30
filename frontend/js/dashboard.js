@@ -39,17 +39,21 @@ class DashboardManager {
             this.modalAddExchange.style.display = 'flex';
             document.getElementById('extended-api-key').value = window.walletManager.getExtendedApiKey() || '';
             document.getElementById('wallet-address-input').value = '';
+            document.getElementById('wallet-label-input').value = '';
             this.exchangeSelect.value = '';
             this.extendedConfigGroup.style.display = 'none';
+            document.getElementById('variational-config-group').style.display = 'none';
             document.getElementById('multi-wallet-group').style.display = 'none';
+            document.getElementById('label-group').style.display = 'none';
         });
 
         this.exchangeSelect.addEventListener('change', (e) => {
             const v = e.target.value;
             this.extendedConfigGroup.style.display = v === 'extended' ? 'block' : 'none';
-            document.getElementById('variational-config-group').style.display = v === 'variational' ? 'block' : 'none';
-            // Show multi-wallet group for any selected exchange
+            document.getElementById('variational-config-group').style.display = 'none'; // disabled
+            // Show wallet address and label for any selected exchange
             document.getElementById('multi-wallet-group').style.display = v ? 'block' : 'none';
+            document.getElementById('label-group').style.display = v ? 'block' : 'none';
         });
 
         document.querySelectorAll('.btn-close-modal').forEach(btn => {
@@ -329,14 +333,13 @@ class DashboardManager {
     }
 
     updateSummary() {
-        let totalInitDeposit = 0, totalActDeposit = 0, totalPnL = 0, totalVolume = 0;
+        let totalInitDeposit = 0, totalPnL = 0, totalVolume = 0;
         let totalWinRate = 0, activeCount = 0;
 
         Object.values(this.walletData).forEach(d => {
             if (!d) return;
             activeCount++;
             totalInitDeposit += d.initDeposit || 0;
-            totalActDeposit  += d.actDeposit  || 0;
             totalPnL         += d.pnl         || 0;
             totalVolume      += d.volume       || 0;
             totalWinRate     += d.winRate      || 0;
@@ -348,8 +351,8 @@ class DashboardManager {
         const pnlPct = totalInitDeposit > 0 ? (totalPnL / totalInitDeposit) * 100 : 0;
 
         const el = (id) => document.getElementById(id);
-        // 01 // initianal_DEPOSIT = sum of all initDeposit across all wallets/exchanges
-        if (el('total-deposit'))  el('total-deposit').textContent  = window.Utils.formatCurrency(totalInitDeposit);
+        // 01 // INITIAL_DEPOSIT = sum of all initDeposit across all wallets/exchanges
+        if (el('total-deposit'))     el('total-deposit').textContent     = window.Utils.formatCurrency(totalInitDeposit);
         if (el('total-pnl')) {
             const pnlSign = pnlPct >= 0 ? '+' : '';
             el('total-pnl').textContent  = `${window.Utils.formatCurrency(totalPnL)} (${pnlSign}${pnlPct.toFixed(2)}%)`;

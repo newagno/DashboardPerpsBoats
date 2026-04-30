@@ -75,7 +75,7 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
         };
 
         // Fetch all endpoints in parallel
-        const [balanceRes, tradesRes, pointsRes, opsRes, leaderboardRes, positionsRes] = await Promise.all([
+        const [balanceRes, tradesRes, pointsRes, opsRes, leaderboardRes, positionsRes, ordersHistRes] = await Promise.all([
             http.get(`${BASE}/user/balance`, { headers })
                 .catch(e => { console.error('Extended balance:', e.message); return { data: {} }; }),
             fetchAllPaginated('/user/trades'),
@@ -84,7 +84,9 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
             fetchAllPaginated('/user/assetOperations'),
             http.get(`${BASE}/user/rewards/leaderboard/stats`, { headers })
                 .catch(e => { console.error('Extended leaderboard:', e.message); return { data: { data: {} } }; }),
-            fetchAllPaginated('/user/positions/history')
+            fetchAllPaginated('/user/positions/history'),
+            // Also fetch filled orders history — trades endpoint may miss some fills
+            fetchAllPaginated('/user/orders/history')
         ]);
 
         // INIT_DEPOSIT = sum(DEPOSIT amounts) - sum(WITHDRAWAL amounts)
@@ -103,12 +105,34 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
         const balData = balanceRes.data?.data || balanceRes.data || {};
         const actDeposit = parseFloat(balData.balance || balData.equity || 0);
 
-        // VOLUME = sum of all trades notional value
-        // Docs: GET /api/v1/user/trades → abs(notional or value or qty*price)
-        let totalVolume = 0;
+        // VOLUME method 1: sum of all trades notional value
+        // Docs: GET /api/v1/user/trades → value = actual filled absolute nominal value
+        let volumeFromTrades = 0;
         for (const t of tradesRes) {
-            totalVolume += Math.abs(parseFloat(t.value || t.notional || 0) || Math.abs(parseFloat(t.qty || 0) * parseFloat(t.price || 0)));
+            const val = parseFloat(t.value || 0);
+            if (val !== 0) {
+                volumeFromTrades += Math.abs(val);
+            } else {
+                // Fallback: qty * price
+                volumeFromTrades += Math.abs(parseFloat(t.qty || 0) * parseFloat(t.price || 0));
+            }
         }
+
+        // VOLUME method 2: sum from filled orders history (filledQty * averagePrice)
+        // This catches orders the trades endpoint may not return
+        let volumeFromOrders = 0;
+        for (const o of ordersHistRes) {
+            if (o.status === 'FILLED' || o.status === 'PARTIALLY_FILLED') {
+                const fq = parseFloat(o.filledQty || 0);
+                const ap = parseFloat(o.averagePrice || 0);
+                if (fq > 0 && ap > 0) {
+                    volumeFromOrders += fq * ap;
+                }
+            }
+        }
+
+        // Use whichever source gives the higher (more complete) volume
+        const finalVolume = Math.max(volumeFromTrades, volumeFromOrders);
 
         // WIN_RATE = count of closed positions with realisedPnl > 0
         let wins = 0, totalClosed = 0;
@@ -123,12 +147,10 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
         // PNL = ACT_DEPOSIT - INIT_DEPOSIT
         const pnl = actDeposit - initDeposit;
 
-        // VOLUME from leaderboard if available (overcomes 10k trade limit)
-        const lbData = leaderboardRes.data?.data || {};
-        const volumeFromLB = parseFloat(lbData.volume || 0);
-        const finalVolume = Math.max(totalVolume, volumeFromLB);
+        console.log(`[Extended] Trades: ${tradesRes.length}, Volume(trades): $${volumeFromTrades.toFixed(2)}, Orders: ${ordersHistRes.length}, Volume(orders): $${volumeFromOrders.toFixed(2)}, Final: $${finalVolume.toFixed(2)}`);
 
         // RANK from leaderboard stats
+        const lbData = leaderboardRes.data?.data || {};
         const rank = lbData.rank || null;
 
         res.json({
@@ -186,7 +208,7 @@ app.post('/api/exchanges/nado/stats', async (req, res) => {
         let allOrders = [];
         let cursor = null;
         let hasMore = true;
-        for (let i = 0; i < 50; i++) {
+        for (let i = 0; i < 200; i++) {
             if (!hasMore) break;
             const pld = { orders: { subaccounts: [sender], limit: 100 } };
             if (cursor) pld.orders.idx = cursor;
@@ -229,9 +251,13 @@ app.post('/api/exchanges/nado/stats', async (req, res) => {
         // PNL: use points API value if available, fallback to calculated
         const apiPnl = allTime.pnl ? parseFloat(allTime.pnl) / 1e18 : null;
         const finalPnl = apiPnl !== null ? apiPnl : pnlFromTrades;
-        // VOLUME: use order-calculated totalVolume (sum of quote_filled) as primary source.
-        // The points API volume (allTime.volume) is an internal metric that doesn't match real trade volume.
-        const finalVolume = totalVolume > 0 ? totalVolume : (allTime.volume ? parseFloat(allTime.volume) / 1e18 : 0);
+        // VOLUME: use order-based sum as primary — it reflects actual trades.
+        // With 200 pagination iterations × 100 per batch = up to 20,000 orders, this should capture everything.
+        // Points API volume is inflated and doesn't match real trading volume.
+        const apiVolume = allTime.volume ? parseFloat(allTime.volume) / 1e18 : null;
+        const finalVolume = totalVolume > 0 ? totalVolume : (apiVolume || 0);
+
+        console.log(`[Nado] Orders: ${allOrders.length}, Volume from orders: $${totalVolume.toFixed(2)}, API volume: $${apiVolume !== null ? apiVolume.toFixed(2) : 'N/A'}, Final: $${finalVolume.toFixed(2)}`);
 
         res.json({
             snapshot: { assets: totalEquity },
@@ -376,8 +402,13 @@ app.post('/api/exchanges/variational/stats', async (req, res) => {
 });
 
 
-// Start Server
-app.listen(PORT, () => {
-    console.log(`\n🚀 TradeDash Server running at http://localhost:${PORT}`);
-    console.log(`Serving frontend from: ${path.join(__dirname, '../frontend')}`);
-});
+// Start Server (only listen if not running as a Vercel serverless function)
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    app.listen(PORT, () => {
+        console.log(`\n🚀 TradeDash Server running at http://localhost:${PORT}`);
+        console.log(`Serving frontend from: ${path.join(__dirname, '../frontend')}`);
+    });
+}
+
+// Export for Vercel serverless
+module.exports = app;

@@ -11,3 +11,4 @@ backups/
 .agents
 .antigravity
 .DS_Store (для macOS)
+.vercel

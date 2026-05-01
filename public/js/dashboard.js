@@ -303,27 +303,17 @@ class DashboardManager {
         const fortuneText  = document.getElementById('fortune-text');
         if (!key || !chest) return;
 
-        const fortunes = [
-            "The market can remain irrational longer than you can remain solvent.",
-            "Cut your losses short. Let your winners run.",
-            "Don't fight the trend. The trend is your friend.",
-            "Price is the only truth. Everything else is noise.",
-            "The best trade is sometimes no trade at all.",
-            "Risk management is not a feature — it's the product.",
-            "When in doubt, zoom out.",
-            "Patience is the rarest alpha in a casino disguised as a market.",
-            "Fear when others are greedy. Be greedy when others are fearful.",
-            "Every lock has its key. Every vault has its secret."
-        ];
-
-        const hints = [
-            "🔑 The vault whispers... something is missing.",
-            "🔒 A chest unopened holds no treasure.",
-            "🗝 What opens is not always what it seems.",
-            "🔐 The answer is closer than you think."
-        ];
-
         chest.addEventListener('click', () => {
+            const fortunes = window.i18n ? window.i18n.t('fortunes') : [
+                "The market can remain irrational longer than you can remain solvent."
+            ];
+            const hints = [
+                window.i18n ? window.i18n.t('hint_1') : "🔑 The vault whispers... something is missing.",
+                window.i18n ? window.i18n.t('hint_2') : "🔒 A chest unopened holds no treasure.",
+                window.i18n ? window.i18n.t('hint_3') : "🗝 What opens is not always what it seems.",
+                window.i18n ? window.i18n.t('hint_4') : "🔐 The answer is closer than you think."
+            ];
+
             const quote = fortunes[Math.floor(Math.random() * fortunes.length)];
             const hint  = hints[Math.floor(Math.random() * hints.length)];
             const hintEl = fortunePopup.querySelector('.fortune-hint');
@@ -338,6 +328,7 @@ class DashboardManager {
         });
 
         // Easter egg — КЛЮЧ перетягнути на СУНДУК = ACCESS_GRANTED
+        // Desktop drag events
         key.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', 'key'); });
         chest.addEventListener('dragover', (e) => { e.preventDefault(); });
         chest.addEventListener('drop', (e) => {
@@ -346,6 +337,48 @@ class DashboardManager {
                 confetti({ particleCount: 200, spread: 90, origin: { y: 0.5 }, colors: ['#FF4836','#FFD700','#FFFFFF'] });
                 modal.style.display = 'flex';
             }
+        });
+
+        // Mobile touch events for drag and drop
+        let startX, startY, initialX, initialY;
+        key.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            startX = touch.clientX;
+            startY = touch.clientY;
+            const rect = key.getBoundingClientRect();
+            initialX = rect.left;
+            initialY = rect.top;
+            key.style.position = 'fixed';
+            key.style.zIndex = '9999';
+            key.style.left = initialX + 'px';
+            key.style.top = initialY + 'px';
+        }, { passive: false });
+
+        key.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const dx = touch.clientX - startX;
+            const dy = touch.clientY - startY;
+            key.style.transform = `translate(${dx}px, ${dy}px)`;
+        }, { passive: false });
+
+        key.addEventListener('touchend', (e) => {
+            const touch = e.changedTouches[0];
+            const chestRect = chest.getBoundingClientRect();
+            
+            // Check if drop location overlaps chest
+            if (touch.clientX >= chestRect.left && touch.clientX <= chestRect.right &&
+                touch.clientY >= chestRect.top && touch.clientY <= chestRect.bottom) {
+                confetti({ particleCount: 200, spread: 90, origin: { y: 0.5 }, colors: ['#FF4836','#FFD700','#FFFFFF'] });
+                modal.style.display = 'flex';
+            }
+            
+            // Reset key position
+            key.style.position = '';
+            key.style.zIndex = '';
+            key.style.left = '';
+            key.style.top = '';
+            key.style.transform = '';
         });
     }
 

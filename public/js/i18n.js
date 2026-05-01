@@ -52,6 +52,8 @@ const translations = {
         
         'hint_1': '🔑 The vault whispers... something is missing.',
         'hint_2': '🔒 A chest unopened holds no treasure.',
+        'hint_3': '🗝 What opens is not always what it seems.',
+        'hint_4': '🔐 The answer is closer than you think.',
         
         'fortunes': [
             "The market can remain irrational longer than you can remain solvent.",
@@ -119,6 +121,8 @@ const translations = {
         
         'hint_1': '🔑 Сейф шепоче... чогось не вистачає.',
         'hint_2': '🔒 Невикрита скриня не містить скарбів.',
+        'hint_3': '🗝 Те, що відкривається, не завжди є тим, чим здається.',
+        'hint_4': '🔐 Відповідь ближче, ніж ти думаєш.',
         
         'fortunes': [
             "Ринок може залишатися ірраціональним довше, ніж ти платоспроможним.",

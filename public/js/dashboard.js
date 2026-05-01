@@ -66,13 +66,27 @@ class DashboardManager {
     initKeyTracking() {
         const key = document.getElementById('draggable-key');
         if (!key) return;
+        
+        const rotateKey = (cx, cy, x, y) => {
+            const angle = Math.atan2(y - cy, x - cx) * (180 / Math.PI);
+            key.style.transform = `rotate(${angle}deg)`;
+        };
+
         document.addEventListener('mousemove', (e) => {
             const rect = key.getBoundingClientRect();
             const cx = rect.left + rect.width  / 2;
             const cy = rect.top  + rect.height / 2;
-            const angle = Math.atan2(e.clientY - cy, e.clientX - cx) * (180 / Math.PI);
-            key.style.transform = `rotate(${angle}deg)`;
+            rotateKey(cx, cy, e.clientX, e.clientY);
         });
+
+        document.addEventListener('touchmove', (e) => {
+            if (e.touches[0]) {
+                const rect = key.getBoundingClientRect();
+                const cx = rect.left + rect.width  / 2;
+                const cy = rect.top  + rect.height / 2;
+                rotateKey(cx, cy, e.touches[0].clientX, e.touches[0].clientY);
+            }
+        }, { passive: true });
     }
 
     async init() {

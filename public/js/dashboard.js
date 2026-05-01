@@ -221,26 +221,35 @@ class DashboardManager {
         const fortunes = [
             "The market can remain irrational longer than you can remain solvent.",
             "Cut your losses short. Let your winners run.",
-            "Buy high, sell low — said every rekt trader ever.",
             "Don't fight the trend. The trend is your friend.",
             "Price is the only truth. Everything else is noise.",
             "The best trade is sometimes no trade at all.",
             "Risk management is not a feature — it's the product.",
             "When in doubt, zoom out.",
             "Patience is the rarest alpha in a casino disguised as a market.",
-            "Fear when others are greedy. Be greedy when others are fearful."
+            "Fear when others are greedy. Be greedy when others are fearful.",
+            "Every lock has its key. Every vault has its secret."
         ];
 
-        // Fortune cookie — single click on chest (ЗАМОК без КЛЮЧА)
+        const hints = [
+            "🔑 The vault whispers... something is missing.",
+            "🔒 A chest unopened holds no treasure.",
+            "🗝 What opens is not always what it seems.",
+            "🔐 The answer is closer than you think."
+        ];
+
         chest.addEventListener('click', () => {
             const quote = fortunes[Math.floor(Math.random() * fortunes.length)];
+            const hint  = hints[Math.floor(Math.random() * hints.length)];
+            const hintEl = fortunePopup.querySelector('.fortune-hint');
+            if (hintEl) hintEl.textContent = hint;
             fortuneText.textContent = `"${quote}"`;
             fortunePopup.style.display = 'block';
             fortunePopup.style.animation = 'none';
-            void fortunePopup.offsetWidth; // reflow
+            void fortunePopup.offsetWidth;
             fortunePopup.style.animation = 'slideInRight 0.4s ease';
             clearTimeout(this._fortuneTimer);
-            this._fortuneTimer = setTimeout(() => { fortunePopup.style.display = 'none'; }, 6000);
+            this._fortuneTimer = setTimeout(() => { fortunePopup.style.display = 'none'; }, 7000);
         });
 
         // Easter egg — КЛЮЧ перетягнути на СУНДУК = ACCESS_GRANTED
@@ -307,10 +316,20 @@ class DashboardManager {
         const data     = this.walletData[id] || {};
         const pnlClass = (data.pnl || 0) >= 0 ? 'positive' : 'negative';
 
-        // ── Point value metric ─────────────────────────────────────────────
-        const pointValue = (data.points && data.points > 0 && data.initDeposit > 0)
-            ? `$${(data.initDeposit / data.points).toFixed(4)}`
-            : 'N/A';
+        // ── $/POINT metric ─────────────────────────────────────────────────
+        // Logic: how much capital you "paid" per point earned
+        // When PNL < 0 (loss): cost = |PNL| / points  (each point cost you $X in losses)
+        // When PNL >= 0 (profit): cost = 0 — points are "free", you made money AND earned points
+        let pointValue = 'FREE';
+        if (data.points && data.points > 0) {
+            if (data.pnl < 0) {
+                pointValue = `$${(Math.abs(data.pnl) / data.points).toFixed(4)}`;
+            } else {
+                pointValue = `+$${(data.pnl / data.points).toFixed(4)}`; // earning per point
+            }
+        } else {
+            pointValue = 'N/A';
+        }
 
         card.innerHTML = `
             <div class="card-header" style="display: flex; align-items: center;">
@@ -351,8 +370,9 @@ class DashboardManager {
         d.actDeposit  = rawData.act_deposit  || 0;
         d.volume      = rawData.total_volume || 0;
         d.winRate     = rawData.win_rate     || 0;
-        d.pnl         = rawData.pnl          || (d.actDeposit - d.initDeposit);
         d.rank        = rawData.rank;
+        // PNL = ACT_DEPOSIT - INIT_DEPOSIT (universal formula for all exchanges)
+        d.pnl         = d.actDeposit - d.initDeposit;
 
         if (exchange === 'nado') {
             const ptsVal = rawData.points?.points || rawData.points || 0;
@@ -389,28 +409,36 @@ class DashboardManager {
 
     updateSummary() {
         let totalInit = 0, totalPnL = 0, totalVol = 0, totalWinRate = 0, winRateCount = 0;
-        let totalPoints = 0, totalPointsWithDeposit = 0;
+        let totalPoints = 0;
 
         Object.values(this.walletData).forEach(d => {
-            totalInit += d.initDeposit;
-            totalPnL  += d.pnl;
-            totalVol  += d.volume;
-            if (d.points > 0) { totalPoints += d.points; totalPointsWithDeposit += d.initDeposit; }
+            totalInit  += d.initDeposit;
+            totalPnL   += d.pnl;  // pnl = actDeposit - initDeposit per card
+            totalVol   += d.volume;
+            if (d.points > 0) totalPoints += d.points;
             if (typeof d.winRate === 'number' && !isNaN(d.winRate) && d.winRate > 0) {
                 totalWinRate += d.winRate; winRateCount++;
             }
         });
-        const meanWinRate   = winRateCount > 0 ? (totalWinRate / winRateCount) : 0;
-        const avgPointValue = totalPoints > 0 ? (totalPointsWithDeposit / totalPoints) : 0;
+        const meanWinRate = winRateCount > 0 ? (totalWinRate / winRateCount) : 0;
+
+        // $/POINT for summary: same logic — if total PNL < 0, cost = |PNL|/pts; if >= 0, free/earning
+        let avgPointValue = 'N/A';
+        if (totalPoints > 0) {
+            if (totalPnL < 0) {
+                avgPointValue = `$${(Math.abs(totalPnL) / totalPoints).toFixed(4)}/pt`;
+            } else {
+                avgPointValue = `+$${(totalPnL / totalPoints).toFixed(4)}/pt`;
+            }
+        }
 
         document.getElementById('total-deposit').textContent  = window.Utils.formatCurrency(totalInit);
         document.getElementById('total-pnl').textContent      = window.Utils.formatCurrency(totalPnL);
         document.getElementById('total-volume').textContent   = window.Utils.formatCurrency(totalVol);
         document.getElementById('total-win-rate').textContent = window.Utils.formatPercent(meanWinRate);
 
-        // ── $/POINT summary metric ─────────────────────────────────────────
         const ppEl = document.getElementById('total-point-value');
-        if (ppEl) ppEl.textContent = avgPointValue > 0 ? `$${avgPointValue.toFixed(4)}/pt` : 'N/A';
+        if (ppEl) ppEl.textContent = avgPointValue;
     }
 }
 

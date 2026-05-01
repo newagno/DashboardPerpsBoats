@@ -91,12 +91,12 @@ body::after {
     height: 60px;
     width: auto;
     cursor: pointer;
-    filter: sepia(1) saturate(3) hue-rotate(-30deg) brightness(0.85) contrast(1.1);
+    filter: sepia(1) saturate(5) hue-rotate(-55deg) brightness(0.8) contrast(1.2);
     transition: filter 0.3s ease, transform 0.2s ease;
 }
 
 .chest-icon:hover {
-    filter: sepia(1) saturate(4) hue-rotate(-30deg) brightness(1.05) contrast(1.1) drop-shadow(0 0 10px rgba(255, 72, 54, 0.8));
+    filter: sepia(1) saturate(6) hue-rotate(-55deg) brightness(0.95) contrast(1.2) drop-shadow(0 0 12px rgba(255, 72, 54, 0.9));
     transform: scale(1.07);
 }
 

@@ -261,7 +261,11 @@ app.post('/api/exchanges/nado/stats', async (req, res) => {
             const rpnl = (parseFloat(o.realized_pnl) || 0) / 1e18;
             const fee  = (parseFloat(o.fee) || 0) / 1e18;
             pnlFromTrades += (rpnl - fee);
-            if ((parseFloat(o.realized_pnl) || 0) !== 0) { totalClosed++; if (rpnl > 0) wins++; }
+            // Only count actual trades (product_id 0 = USDT0 collateral movements, not trades)
+            if (o.product_id !== 0 && (parseFloat(o.realized_pnl) || 0) !== 0) {
+                totalClosed++;
+                if (rpnl > 0) wins++;
+            }
         }
         const winRate = totalClosed > 0 ? (wins / totalClosed) * 100 : 0;
 

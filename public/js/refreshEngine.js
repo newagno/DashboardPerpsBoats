@@ -7,6 +7,7 @@ class RefreshEngine {
         this.interval = 5 * 60 * 1000; // 5 minutes
         this.timerId = null;
         this.isRefreshing = false;
+        this.isNextCircle = true;
     }
 
     start() {
@@ -23,16 +24,11 @@ class RefreshEngine {
 
         console.log('Starting parallel refresh cycle...');
         this.isRefreshing = true;
-        this.updateLoadingState(true);
-
-        const sessionAddress = window.walletManager.state.address;
-        if (!sessionAddress) {
-            this.isRefreshing = false;
-            this.updateLoadingState(false);
-            return;
-        }
+        const isInitial = Object.keys(window.dashboardMgr.walletData || {}).length === 0;
+        this.updateLoadingState(true, isInitial);
 
         const exchangeEntries = window.walletManager.state.activeExchanges;
+        const sessionAddress = window.walletManager.state.address;
 
         if (!exchangeEntries || exchangeEntries.length === 0) {
             this.isRefreshing = false;
@@ -83,15 +79,26 @@ class RefreshEngine {
         this.updateLoadingState(false);
     }
 
-    updateLoadingState(loading) {
+    updateLoadingState(loading, isInitial = false) {
         const overlay = document.getElementById('loading-overlay');
         const refreshBtn = document.getElementById('refresh-btn');
         if (loading) {
-            overlay.style.display = 'flex';
-            refreshBtn.classList.add('spinning');
+            if (isInitial) overlay.style.display = 'flex';
+            if (this.isNextCircle) {
+                refreshBtn.style.animation = 'spin-to-circle 1s linear infinite';
+            } else {
+                refreshBtn.style.animation = 'spin-to-square 1s linear infinite';
+            }
         } else {
             overlay.style.display = 'none';
-            refreshBtn.classList.remove('spinning');
+            refreshBtn.style.animation = 'none';
+            if (this.isNextCircle) {
+                refreshBtn.style.borderRadius = '50%';
+                this.isNextCircle = false;
+            } else {
+                refreshBtn.style.borderRadius = '0%';
+                this.isNextCircle = true;
+            }
         }
     }
 }

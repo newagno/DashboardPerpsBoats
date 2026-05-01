@@ -1,4 +1,4 @@
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const { ethers } = require('ethers');
 
 // In-memory stores (in production, use Redis)
@@ -31,7 +31,7 @@ const getNonce = (req, res) => {
             return res.status(400).json({ error: 'Invalid address' });
         }
 
-        const nonce = uuidv4();
+        const nonce = crypto.randomUUID();
         nonces.set(address, {
             nonce,
             timestamp: Date.now(),
@@ -106,7 +106,7 @@ const verifySig = async (req, res) => {
         nonces.delete(lowerAddress);
 
         // Create Session
-        const sessionId = uuidv4();
+        const sessionId = crypto.randomUUID();
         sessions.set(sessionId, {
             address: lowerAddress,
             connectedAt: Date.now()

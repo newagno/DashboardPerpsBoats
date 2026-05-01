@@ -90,11 +90,21 @@ class WalletManager {
         while (!window.appKit) await new Promise(r => setTimeout(r, 100));
     }
 
-    setExtendedApiKey(id, key) { this.state.extendedApiKeys[id] = key; }
-    getExtendedApiKey(id) { return this.state.extendedApiKeys[id] || null; }
+    setExtendedApiKey(id, key) { 
+        this.state.extendedApiKeys[id] = key; 
+        localStorage.setItem('extendedApiKey_' + id, key);
+    }
+    getExtendedApiKey(id) { 
+        return this.state.extendedApiKeys[id] || localStorage.getItem('extendedApiKey_' + id) || null; 
+    }
     
-    setVariationalToken(id, token) { this.state.variationalTokens[id] = token; }
-    getVariationalToken(id) { return this.state.variationalTokens[id] || null; }
+    setVariationalToken(id, token) { 
+        this.state.variationalTokens[id] = token; 
+        localStorage.setItem('variationalToken_' + id, token);
+    }
+    getVariationalToken(id) { 
+        return this.state.variationalTokens[id] || localStorage.getItem('variationalToken_' + id) || null; 
+    }
 
     /**
      * Add a wallet entry.
@@ -126,8 +136,14 @@ class WalletManager {
         const entry = this.state.activeExchanges.find(e => e.id === id);
         this.state.activeExchanges = this.state.activeExchanges.filter(e => e.id !== id);
         this._saveExchanges();
-        if (entry?.exchange === 'extended') delete this.state.extendedApiKeys[id];
-        if (entry?.exchange === 'variational') delete this.state.variationalTokens[id];
+        if (entry?.exchange === 'extended') {
+            delete this.state.extendedApiKeys[id];
+            localStorage.removeItem('extendedApiKey_' + id);
+        }
+        if (entry?.exchange === 'variational') {
+            delete this.state.variationalTokens[id];
+            localStorage.removeItem('variationalToken_' + id);
+        }
     }
 
     async connectMetaMask() {

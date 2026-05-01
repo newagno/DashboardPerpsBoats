@@ -13,8 +13,16 @@ const http = axios.create({ timeout: 60000 });
 // Middleware
 app.use(cors({
     origin: (origin, callback) => {
-        const whitelist = ['http://localhost:3000', 'http://127.0.0.1:3000'];
-        if (!origin || whitelist.indexOf(origin) !== -1) {
+        const allowedOrigins = [
+            'http://localhost:3000',
+            'http://127.0.0.1:3000',
+            'http://localhost:5000',
+            'http://127.0.0.1:5000',
+            'https://tradedash-local.com',
+            'https://dashboard-perps.vercel.app',
+            'https://dashboard-perps-aiunch7i4-newagnos-projects-d51e8127.vercel.app'
+        ];
+        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
             callback(new Error('Not allowed by CORS'));
@@ -27,9 +35,9 @@ app.use(cookieParser());
 
 app.get('/', (req, res) => { res.redirect('/dashboard'); });
 app.get('/dashboard', (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/dashboard.html'));
+    res.sendFile(path.join(__dirname, '../public/dashboard.html'));
 });
-app.use(express.static(path.join(__dirname, '../frontend')));
+app.use(express.static(path.join(__dirname, '../public')));
 
 // ─── Auth Routes ───────────────────────────────────────────────
 app.get('/api/auth/nonce', authController.getNonce);
@@ -50,12 +58,13 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
 
         const BASE = 'https://api.starknet.extended.exchange/api/v1';
 
-        // Paginated fetch helper
+        // Paginated fetch helper - optimized for Serverless (limit iterations to avoid timeout)
         const fetchAllPaginated = async (endpoint) => {
             let all = [];
             const seen = new Set();
             let cursor = null;
-            for (let i = 0; i < 2000; i++) {
+            // Reduced from 2000 to 100 for Vercel compatibility
+            for (let i = 0; i < 100; i++) {
                 try {
                     let url = `${BASE}${endpoint}${endpoint.includes('?') ? '&' : '?'}limit=10000`;
                     if (cursor) url += `&cursor=${cursor}`;
@@ -77,16 +86,20 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
         // Fetch all endpoints in parallel
         const [balanceRes, tradesRes, pointsRes, opsRes, leaderboardRes, positionsRes, ordersHistRes] = await Promise.all([
             http.get(`${BASE}/user/balance`, { headers })
-                .catch(e => { console.error('Extended balance:', e.message); return { data: {} }; }),
-            fetchAllPaginated('/user/trades'),
+                .catch(e => { console.error('Extended balance error:', e.message); return { data: {} }; }),
+            fetchAllPaginated('/user/trades')
+                .catch(e => { console.error('Extended trades error:', e.message); return []; }),
             http.get(`${BASE}/user/rewards/earned`, { headers })
-                .catch(e => { console.error('Extended points:', e.message); return { data: { data: [] } }; }),
-            fetchAllPaginated('/user/assetOperations'),
+                .catch(e => { console.error('Extended points error:', e.message); return { data: { data: [] } }; }),
+            fetchAllPaginated('/user/assetOperations')
+                .catch(e => { console.error('Extended ops error:', e.message); return []; }),
             http.get(`${BASE}/user/rewards/leaderboard/stats`, { headers })
-                .catch(e => { console.error('Extended leaderboard:', e.message); return { data: { data: {} } }; }),
-            fetchAllPaginated('/user/positions/history'),
+                .catch(e => { console.error('Extended leaderboard error:', e.message); return { data: { data: {} } }; }),
+            fetchAllPaginated('/user/positions/history')
+                .catch(e => { console.error('Extended positions error:', e.message); return []; }),
             // Also fetch filled orders history — trades endpoint may miss some fills
             fetchAllPaginated('/user/orders/history')
+                .catch(e => { console.error('Extended orders hist error:', e.message); return []; })
         ]);
 
         // INIT_DEPOSIT = sum(DEPOSIT amounts) - sum(WITHDRAWAL amounts)
@@ -109,12 +122,12 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
         // Docs: GET /api/v1/user/trades → value = actual filled absolute nominal value
         let volumeFromTrades = 0;
         for (const t of tradesRes) {
-            const val = parseFloat(t.value || 0);
+            const val = Math.abs(parseFloat(t.value) || 0);
             if (val !== 0) {
-                volumeFromTrades += Math.abs(val);
+                volumeFromTrades += val;
             } else {
                 // Fallback: qty * price
-                volumeFromTrades += Math.abs(parseFloat(t.qty || 0) * parseFloat(t.price || 0));
+                volumeFromTrades += Math.abs((parseFloat(t.qty) || 0) * (parseFloat(t.price) || 0));
             }
         }
 
@@ -123,8 +136,8 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
         let volumeFromOrders = 0;
         for (const o of ordersHistRes) {
             if (o.status === 'FILLED' || o.status === 'PARTIALLY_FILLED') {
-                const fq = parseFloat(o.filledQty || 0);
-                const ap = parseFloat(o.averagePrice || 0);
+                const fq = Math.abs(parseFloat(o.filledQty) || 0);
+                const ap = Math.abs(parseFloat(o.averagePrice) || 0);
                 if (fq > 0 && ap > 0) {
                     volumeFromOrders += fq * ap;
                 }
@@ -147,7 +160,7 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
         // PNL = ACT_DEPOSIT - INIT_DEPOSIT
         const pnl = actDeposit - initDeposit;
 
-        console.log(`[Extended] Trades: ${tradesRes.length}, Volume(trades): $${volumeFromTrades.toFixed(2)}, Orders: ${ordersHistRes.length}, Volume(orders): $${volumeFromOrders.toFixed(2)}, Final: $${finalVolume.toFixed(2)}`);
+        console.log(`[Extended] Trades: ${tradesRes.length}, Volume(trades): $${(volumeFromTrades || 0).toFixed(2)}, Orders: ${ordersHistRes.length}, Volume(orders): $${(volumeFromOrders || 0).toFixed(2)}, Final: $${(finalVolume || 0).toFixed(2)}`);
 
         // RANK from leaderboard stats
         const lbData = leaderboardRes.data?.data || {};
@@ -180,8 +193,7 @@ app.post('/api/exchanges/nado/stats', async (req, res) => {
 
         const archiveHeaders = {
             'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'Accept-Encoding': 'gzip'
+            'Content-Type': 'application/json'
         };
 
         // build sender from targetAddress for Nado (pad with default)
@@ -208,8 +220,9 @@ app.post('/api/exchanges/nado/stats', async (req, res) => {
         let allOrders = [];
         let cursor = null;
         let hasMore = true;
+        const startTime = Date.now();
         for (let i = 0; i < 200; i++) {
-            if (!hasMore) break;
+            if (!hasMore || (Date.now() - startTime > 8500)) break; // Safety break at 8.5s
             const pld = { orders: { subaccounts: [sender], limit: 100 } };
             if (cursor) pld.orders.idx = cursor;
             
@@ -225,39 +238,61 @@ app.post('/api/exchanges/nado/stats', async (req, res) => {
         }
 
         for (const o of allOrders) {
-            totalVolume += Math.abs(parseFloat(o.quote_filled || 0)) / 1e18;
-            const rpnl = parseFloat(o.realized_pnl || 0) / 1e18;
-            const fee = parseFloat(o.fee || 0) / 1e18;
+            totalVolume += Math.abs(parseFloat(o.quote_filled) || 0) / 1e18;
+            const rpnl = (parseFloat(o.realized_pnl) || 0) / 1e18;
+            const fee = (parseFloat(o.fee) || 0) / 1e18;
             pnlFromTrades += (rpnl - fee);
             
-            if (parseFloat(o.realized_pnl || 0) !== 0) {
+            if ((parseFloat(o.realized_pnl) || 0) !== 0) {
                 totalClosed++;
                 if (rpnl > 0) wins++;
             }
         }
         
         const winRate = totalClosed > 0 ? (wins / totalClosed) * 100 : 0;
-        const netDeposit = totalEquity - pnlFromTrades;
 
         // 3. Points & Rank & PNL/Volume from Points API
         const pointsRes = await http.post('https://archive.prod.nado.xyz/v1', {
             nado_points: { address: targetAddress }
         }, { headers: archiveHeaders }).catch(() => ({ data: {} }));
         
+        // 4. Initial Deposit from Subaccount Snapshots
+        const snapRes = await http.post('https://archive.prod.nado.xyz/v1', {
+            account_snapshots: {
+                subaccounts: [sender],
+                timestamps: [Date.now() * 1000000],
+                active: true
+            }
+        }, { headers: archiveHeaders }).catch(() => ({ data: {} }));
+        
+        let initDeposit = 0;
+        const snapData = snapRes.data?.snapshots?.[sender];
+        if (snapData) {
+            const tsKey = Object.keys(snapData)[0];
+            if (tsKey && snapData[tsKey]) {
+                const prod0 = snapData[tsKey].find(a => a.product_id === 0);
+                if (prod0 && prod0.net_entry_cumulative) {
+                    initDeposit = parseFloat(prod0.net_entry_cumulative) / 1e18;
+                }
+            }
+        }
+        
+        // If snapshot endpoint fails, fallback to equity - pnl
         const allTime = pointsRes.data?.all_time_points || {};
         const totalPoints = parseFloat(allTime.points || 0);
         const rank = allTime.rank ? parseInt(allTime.rank) : null;
         
-        // PNL: use points API value if available, fallback to calculated
         const apiPnl = allTime.pnl ? parseFloat(allTime.pnl) / 1e18 : null;
         const finalPnl = apiPnl !== null ? apiPnl : pnlFromTrades;
-        // VOLUME: use order-based sum as primary — it reflects actual trades.
-        // With 200 pagination iterations × 100 per batch = up to 20,000 orders, this should capture everything.
-        // Points API volume is inflated and doesn't match real trading volume.
-        const apiVolume = allTime.volume ? parseFloat(allTime.volume) / 1e18 : null;
-        const finalVolume = totalVolume > 0 ? totalVolume : (apiVolume || 0);
+        
+        // Calculate net deposit using final PNL if snapRes failed
+        const netDeposit = initDeposit !== 0 ? initDeposit : (totalEquity - finalPnl);
 
-        console.log(`[Nado] Orders: ${allOrders.length}, Volume from orders: $${totalVolume.toFixed(2)}, API volume: $${apiVolume !== null ? apiVolume.toFixed(2) : 'N/A'}, Final: $${finalVolume.toFixed(2)}`);
+        // VOLUME: use API volume as primary since pagination limit might truncate actual trade volume
+        const apiVolume = allTime.volume ? parseFloat(allTime.volume) / 1e18 : null;
+        const finalVolume = apiVolume !== null ? apiVolume : totalVolume;
+
+        console.log(`[Nado] Orders: ${allOrders.length}, Volume from orders: $${(totalVolume || 0).toFixed(2)}, API volume: $${apiVolume !== null ? apiVolume.toFixed(2) : 'N/A'}, Final: $${(finalVolume || 0).toFixed(2)}`);
 
         res.json({
             snapshot: { assets: totalEquity },

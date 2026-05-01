@@ -1,12 +1,17 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "backend/server.js", "use": "@vercel/node" },
-    { "src": "frontend/**", "use": "@vercel/static" }
-  ],
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/backend/server.js" },
-    { "source": "/dashboard", "destination": "/frontend/dashboard.html" },
-    { "source": "/(.*)", "destination": "/frontend/$1" }
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/dashboard.html"
+    },
+    {
+      "source": "/",
+      "destination": "/dashboard.html"
+    }
   ]
 }

@@ -425,14 +425,14 @@ class DashboardManager {
                 <button class="remove-btn" onclick="window.dashboardMgr.removeWallet('${id}')">×</button>
             </div>
             <div class="wallet-stats-grid">
-                <div class="wallet-stat"><span class="stat-label">INIT_DEPOSIT</span><span class="stat-value">${window.Utils.formatCurrency(data.initDeposit)}</span></div>
-                <div class="wallet-stat"><span class="stat-label">ACT_DEPOSIT</span><span class="stat-value">${window.Utils.formatCurrency(data.actDeposit)}</span></div>
-                <div class="wallet-stat"><span class="stat-label">VOLUME</span><span class="stat-value">${window.Utils.formatCurrency(data.volume)}</span></div>
-                <div class="wallet-stat"><span class="stat-label">POINTS</span><span class="stat-value">${(data.points || 0).toLocaleString()}</span></div>
-                <div class="wallet-stat"><span class="stat-label">RANK</span><span class="stat-value">${data.rank ? data.rank : 'N/A'}</span></div>
-                <div class="wallet-stat"><span class="stat-label">PNL</span><span class="stat-value ${pnlClass}">${window.Utils.formatCurrency(data.pnl)}</span></div>
-                <div class="wallet-stat"><span class="stat-label">WIN_RATE</span><span class="stat-value">${window.Utils.formatPercent(data.winRate)}</span></div>
-                <div class="wallet-stat" style="border-top: 1px dashed rgba(255,72,54,0.3); margin-top:2px;"><span class="stat-label" style="color: rgba(255,72,54,0.7);">$/POINT</span><span class="stat-value" style="color: rgba(255,72,54,0.9); font-size:12px;">${pointValue}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_init_deposit') : '01 // INIT_DEPOSIT'}</span><span class="stat-value">${window.Utils.formatCurrency(data.initDeposit)}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_act_deposit') : '02 // ACT_DEPOSIT'}</span><span class="stat-value">${window.Utils.formatCurrency(data.actDeposit)}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_volume') : '03 // VOLUME'}</span><span class="stat-value">${window.Utils.formatCurrency(data.volume)}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_points') : '04 // POINTS'}</span><span class="stat-value">${(data.points || 0).toLocaleString()}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_rank') : '05 // RANK'}</span><span class="stat-value">${data.rank ? data.rank : 'N/A'}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_pnl') : '06 // PNL'}</span><span class="stat-value ${pnlClass}">${window.Utils.formatCurrency(data.pnl)}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_win_rate') : '07 // WIN_RATE'}</span><span class="stat-value">${window.Utils.formatPercent(data.winRate)}</span></div>
+                <div class="wallet-stat" style="border-top: 1px dashed rgba(255,72,54,0.3); margin-top:2px;"><span class="stat-label" style="color: rgba(255,72,54,0.7);">${window.i18n ? window.i18n.t('card_point_value') : '08 // $/POINT'}</span><span class="stat-value" style="color: rgba(255,72,54,0.9); font-size:12px;">${pointValue}</span></div>
             </div>
             <div class="wallet-footer">
                 <span class="timestamp">Last sync: ${new Date().toLocaleTimeString()}</span>

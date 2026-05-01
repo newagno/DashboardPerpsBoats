@@ -36,10 +36,35 @@ const translations = {
         'refreshing': 'Refreshing...',
         'failed_sync': 'Failed to sync',
         
+        'card_init_deposit': '01 // INIT_DEPOSIT',
+        'card_act_deposit': '02 // ACT_DEPOSIT',
+        'card_volume': '03 // VOLUME',
+        'card_points': '04 // POINTS',
+        'card_rank': '05 // RANK',
+        'card_pnl': '06 // PNL',
+        'card_win_rate': '07 // WIN_RATE',
+        'card_point_value': '08 // $/POINT',
+        
         'easter_success': '🔓 ACCESS_GRANTED',
         'easter_title': 'DECLASSIFIED_INTEL',
         'easter_desc': 'UNIT ID RECOGNIZED. SUBSCRIPTION EXTENSION APPLIED: <strong style="color: var(--colors-token-green, #4CAF50);">+30 DAYS</strong> INCRYPTED+',
-        'easter_close': 'CLOSE_TERMINAL'
+        'easter_close': 'CLOSE_TERMINAL',
+        
+        'hint_1': '🔑 The vault whispers... something is missing.',
+        'hint_2': '🔒 A chest unopened holds no treasure.',
+        
+        'fortunes': [
+            "The market can remain irrational longer than you can remain solvent.",
+            "Cut your losses short. Let your winners run.",
+            "Don't fight the trend. The trend is your friend.",
+            "Price is the only truth. Everything else is noise.",
+            "The best trade is sometimes no trade at all.",
+            "Risk management is not a feature — it's the product.",
+            "When in doubt, zoom out.",
+            "Patience is the rarest alpha in a casino disguised as a market.",
+            "Fear when others are greedy. Be greedy when others are fearful.",
+            "Every lock has its key. Every vault has its secret."
+        ]
     },
     uk: {
         'logo_text': 'Торговий Дашборд',
@@ -78,10 +103,35 @@ const translations = {
         'refreshing': 'Оновлення...',
         'failed_sync': 'Помилка синхронізації',
         
+        'card_init_deposit': '01 // ПОЧАТКОВИЙ ДЕПОЗИТ',
+        'card_act_deposit': '02 // ПОТОЧНИЙ БАЛАНС',
+        'card_volume': '03 // ОБ\'ЄМ',
+        'card_points': '04 // ПОІНТИ',
+        'card_rank': '05 // РАНГ',
+        'card_pnl': '06 // ПРИБУТОК/ЗБИТОК',
+        'card_win_rate': '07 // ВІДСОТОК ПЕРЕМОГ',
+        'card_point_value': '08 // $/ПОІНТ',
+
         'easter_success': '🔓 ДОСТУП НАДАНО',
         'easter_title': 'РОЗСЕКРЕЧЕНІ ДАНІ',
         'easter_desc': 'ІДЕНТИФІКАТОР РОЗПІЗНАНО. ПОДОВЖЕННЯ ПІДПИСКИ: <strong style="color: var(--colors-token-green, #4CAF50);">+30 ДНІВ</strong> INCRYPTED+',
-        'easter_close': 'ЗАКРИТИ ТЕРМІНАЛ'
+        'easter_close': 'ЗАКРИТИ ТЕРМІНАЛ',
+        
+        'hint_1': '🔑 Сейф шепоче... чогось не вистачає.',
+        'hint_2': '🔒 Невикрита скриня не містить скарбів.',
+        
+        'fortunes': [
+            "Ринок може залишатися ірраціональним довше, ніж ти платоспроможним.",
+            "Швидко ріж збитки. Дозволяй прибуткам рости.",
+            "Не йди проти тренду. Тренд — твій друг.",
+            "Ціна — єдина істина. Все інше — шум.",
+            "Найкращий трейд — це іноді відсутність трейду.",
+            "Управління ризиками — це не функція, це сам продукт.",
+            "Коли сумніваєшся — віддали графік (zoom out).",
+            "Терпіння — найрідкісніша альфа в казино, замаскованому під ринок.",
+            "Бійся, коли інші жадібні. Будь жадібним, коли інші бояться.",
+            "До кожного замка є свій ключ. У кожного сейфа є свій секрет."
+        ]
     }
 };
 
@@ -100,7 +150,7 @@ class I18nManager {
         this.lang = lang;
         localStorage.setItem('lang', lang);
         this.applyTranslations();
-        document.getElementById('lang-toggle').textContent = lang === 'en' ? 'UK' : 'EN';
+        document.getElementById('lang-toggle').textContent = lang === 'en' ? 'ENG' : 'UKR';
     }
 
     toggle() {
@@ -112,7 +162,7 @@ class I18nManager {
     initElements() {
         const toggleBtn = document.getElementById('lang-toggle');
         if (toggleBtn) {
-            toggleBtn.textContent = this.lang === 'en' ? 'UK' : 'EN';
+            toggleBtn.textContent = this.lang === 'en' ? 'ENG' : 'UKR';
             toggleBtn.addEventListener('click', () => this.toggle());
         }
     }

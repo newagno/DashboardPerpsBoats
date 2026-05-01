@@ -47,7 +47,11 @@ class RefreshEngine {
                 let data;
                 if (exchange === 'extended') {
                     const extendedKey = window.walletManager.getExtendedApiKey(id);
-                    if (!extendedKey) return null;
+                    if (!extendedKey) {
+                        console.warn(`Ghost entry detected for extended (id: ${id}). Removing.`);
+                        window.walletManager.removeExchange(id);
+                        return null;
+                    }
                     const obj = new window.Exchanges.Extended(extendedKey);
                     data = await obj.getStats();
                 } else if (exchange === 'nado') {
@@ -56,6 +60,11 @@ class RefreshEngine {
                     data = await obj.getStats();
                 } else if (exchange === 'variational') {
                     const vrToken = window.walletManager.getVariationalToken(id);
+                    if (!vrToken) {
+                        console.warn(`Ghost entry detected for variational (id: ${id}). Removing.`);
+                        window.walletManager.removeExchange(id);
+                        return null;
+                    }
                     const obj = new window.Exchanges.Variational(effectiveAddress, vrToken);
                     data = await obj.getStats();
                 } else {

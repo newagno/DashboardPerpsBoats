@@ -21,10 +21,12 @@
         <header class="dash-header">
             <div class="logo">
                 <img src="assets/key.png" alt="Key" class="logo-key-icon" id="draggable-key" draggable="true">
-                <span class="logo-text">Perpetual Trading Dashboard</span>
+                <span class="logo-text" data-i18n="logo_text">Perpetual Trading Dashboard</span>
             </div>
             <div class="header-actions" style="display: flex; gap: 15px; align-items: center;">
                 <span id="last-update" class="timestamp">UTC / 0000-00-00</span>
+                
+                <button id="lang-toggle" class="btn-icon-text" style="padding: 5px 10px; min-width: 45px; font-weight: bold;">UK</button>
                 
                 <div class="chest-container" id="treasure-chest">
                     <img src="assets/chest_premium.png" alt="VAULT" class="chest-icon" id="chest-img" loading="lazy" fetchpriority="high">
@@ -38,7 +40,7 @@
                     <button id="btn-disconnect" class="btn-secondary" style="display: none;">Disconnect</button>
                 </div>
 
-                <button id="btn-add-exchange" class="btn-icon-text">
+                <button id="btn-add-exchange" class="btn-icon-text" data-i18n="btn_add_exchange">
                     [ + ] ADD_EXCHANGE
                 </button>
                 <button id="refresh-btn" class="btn-icon" title="Refresh All">
@@ -51,23 +53,23 @@
             <!-- Summary Section -->
             <section class="summary-grid">
                 <div class="summary-card">
-                    <span class="label">01 // INITIAL_DEPOSIT</span>
+                    <span class="label" data-i18n="init_deposit">01 // INITIAL_DEPOSIT</span>
                     <span id="total-deposit" class="value">$0.00</span>
                 </div>
                 <div class="summary-card">
-                    <span class="label">02 // PNL</span>
+                    <span class="label" data-i18n="pnl">02 // PNL</span>
                     <span id="total-pnl" class="value positive">$0.00</span>
                 </div>
                 <div class="summary-card">
-                    <span class="label">03 // MEAN_WIN_RATE</span>
+                    <span class="label" data-i18n="mean_win_rate">03 // MEAN_WIN_RATE</span>
                     <span id="total-win-rate" class="value">0%</span>
                 </div>
                 <div class="summary-card">
-                    <span class="label">04 // TOTAL_VOLUME</span>
+                    <span class="label" data-i18n="total_volume">04 // TOTAL_VOLUME</span>
                     <span id="total-volume" class="value">$0.00</span>
                 </div>
                 <div class="summary-card">
-                    <span class="label">05 // $/POINT</span>
+                    <span class="label" data-i18n="point_value">05 // $/POINT</span>
                     <span id="total-point-value" class="value" style="color: rgba(255,72,54,0.9);">N/A</span>
                 </div>
             </section>
@@ -77,18 +79,18 @@
             <!-- Wallets Grid -->
             <section class="wallets-section">
                 <div class="section-header">
-                    <h2>ACTIVE / TELEMETRY_STREAMS</h2>
+                    <h2 data-i18n="active_streams">ACTIVE / TELEMETRY_STREAMS</h2>
                 </div>
                 <div id="wallets-container" class="wallets-grid">
                     <!-- Default Empty State -->
                     <div class="empty-state">
-                        <p>NO ACTIVE EXCHANGE CONFIGURED. CLICK "ADD_EXCHANGE" TO INITIALIZE.</p>
+                        <p data-i18n="no_exchange_configured">NO ACTIVE EXCHANGE CONFIGURED. CLICK "ADD_EXCHANGE" TO INITIALIZE.</p>
                     </div>
                 </div>
             </section>
 
             <!-- Warnings -->
-            <div class="security-notice" style="background: rgba(76, 175, 80, 0.1); border-left: 4px solid var(--colors-token-green, #4CAF50); padding: 10px; margin-top: 20px; font-size: 0.85em;">
+            <div class="security-notice" data-i18n="security_notice" style="background: rgba(76, 175, 80, 0.1); border-left: 4px solid var(--colors-token-green, #4CAF50); padding: 10px; margin-top: 20px; font-size: 0.85em;">
                 <strong>SECURITY NOTICE:</strong> We do not ask for or store your private keys. Authorization is handled via secure EIP-712 Web3 signatures and server-side stateful cookies.
             </div>
         </main>
@@ -98,16 +100,16 @@
     <div id="modal-add-exchange" class="modal" style="display: none;">
         <div class="modal-content" style="max-width: 450px;">
             <div class="modal-header">
-                <h3>MODULE / LINK_EXCHANGE</h3>
-                <button type="button" class="close-modal btn-close-modal">ESC</button>
+                <h3 data-i18n="modal_title">MODULE / LINK_EXCHANGE</h3>
+                <button type="button" class="close-modal btn-close-modal" data-i18n="modal_close">ESC</button>
             </div>
             <div class="modal-body" style="padding: 20px 0;">
                 <form id="form-add-exchange" autocomplete="off" onsubmit="event.preventDefault(); return false;">
                     
                     <div class="form-group" style="margin-bottom: 15px;">
-                        <label for="exchange-select">Select Exchange Platform</label>
+                        <label for="exchange-select" data-i18n="select_exchange">Select Exchange Platform</label>
                         <select id="exchange-select" required style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
-                            <option value="" disabled selected>Select Exchange</option>
+                            <option value="" disabled selected data-i18n="select_exchange">Select Exchange</option>
                             <option value="extended">Extended Exchange (Starknet)</option>
                             <option value="nado">Nado (Ink L2)</option>
                             <!-- Variational integration disabled -->
@@ -116,33 +118,33 @@
 
                     <!-- 1. Wallet Address (always first) -->
                     <div id="multi-wallet-group" style="display: none; margin-bottom: 15px;">
-                        <label for="wallet-address-input">Wallet Address</label>
-                        <input type="text" id="wallet-address-input" list="wallet-address-history" placeholder="0x..." autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                        <label for="wallet-address-input" data-i18n="wallet_address">Wallet Address</label>
+                        <input type="text" id="wallet-address-input" list="wallet-address-history" data-i18n="wallet_placeholder" placeholder="0x..." autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
                         <datalist id="wallet-address-history"></datalist>
-                        <div id="wallet-addr-validation" class="validation-msg">⚠ Invalid address — must be 42 chars starting with 0x</div>
+                        <div id="wallet-addr-validation" class="validation-msg" data-i18n="err_invalid_address">⚠ Invalid address — must be 42 chars starting with 0x</div>
                     </div>
 
                     <!-- 2. Extended API Key (only for Extended) -->
                     <div id="extended-config-group" style="display: none; margin-bottom: 15px;">
-                        <p style="font-size: 0.8em; color: var(--text-muted, #94a3b8); margin-bottom: 10px;">
+                        <p style="font-size: 0.8em; color: var(--text-muted, #94a3b8); margin-bottom: 10px;" data-i18n="api_key_desc">
                             Extended requires a Read-Only API Key. This key is <strong>never stored</strong> in localStorage or the server. Persists only in tab memory.
                         </p>
-                        <label for="extended-api-key">Tab-Only Read-Only API Key</label>
-                        <input type="text" id="extended-api-key" placeholder="Paste your API key here" autocomplete="new-password" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                        <label for="extended-api-key" data-i18n="api_key_label">Tab-Only Read-Only API Key</label>
+                        <input type="text" id="extended-api-key" data-i18n="api_key_placeholder" placeholder="Paste your API key here" autocomplete="new-password" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
                     </div>
 
                     <!-- 3. Label (always last) -->
                     <div id="label-group" style="display: none; margin-bottom: 15px;">
-                        <label for="wallet-label-input">Label</label>
-                        <input type="text" id="wallet-label-input" placeholder="e.g. Nado Main, Trading Wallet" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                        <label for="wallet-label-input" data-i18n="label_label">Label</label>
+                        <input type="text" id="wallet-label-input" data-i18n="label_placeholder" placeholder="e.g. Nado Main, Trading Wallet" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
                     </div>
 
                     <!-- Variational config (disabled) -->
                     <div id="variational-config-group" style="display: none;"></div>
 
                     <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-                        <button type="button" class="btn-secondary btn-close-modal">Cancel</button>
-                        <button type="button" id="btn-save-exchange" class="btn-primary" style="display: flex; gap: 8px; align-items: center;">
+                        <button type="button" class="btn-secondary btn-close-modal" data-i18n="btn_cancel">Cancel</button>
+                        <button type="button" id="btn-save-exchange" class="btn-primary" data-i18n="btn_submit_add" style="display: flex; gap: 8px; align-items: center;">
                             Add Exchange
                         </button>
                     </div>
@@ -204,6 +206,7 @@
         window.appKit = appKit;
     </script>
     <script src="https://cdn.ethers.io/lib/ethers-5.7.umd.min.js" defer></script>
+    <script src="js/i18n.js" defer></script>
     <script src="js/walletManager.js" defer></script>
     <script src="js/exchanges.js" defer></script>
     <script src="js/utils.js" defer></script>

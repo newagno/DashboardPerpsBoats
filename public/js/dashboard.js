@@ -21,7 +21,7 @@ class DashboardManager {
             if (addrInput) addrInput.classList.remove('input-error');
             if (vm) {
                 vm.classList.remove('show');
-                vm.textContent = '⚠ Invalid address — must be 42 chars starting with 0x';
+                vm.textContent = window.i18n ? window.i18n.t('err_invalid_address') : '⚠ Invalid address — must be 42 chars starting with 0x';
             }
         };
 
@@ -114,6 +114,17 @@ class DashboardManager {
         this.setupEasterEgg();
         this.setupEventListeners();
         this.checkAuthState();
+
+        window.addEventListener('languageChanged', () => {
+            // Re-render empty state or refresh existing cards with new language
+            if (window.walletManager.state.activeExchanges.length === 0) {
+                this.checkAuthState();
+            } else {
+                const remaining = window.walletManager.state.activeExchanges.map(e => ({...e, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...'}));
+                this.updateAllWalletCards(remaining);
+                window.refreshEngine.refresh();
+            }
+        });
     }
 
     checkAuthState() {
@@ -122,7 +133,7 @@ class DashboardManager {
             this.renderLoading();
             setTimeout(() => window.refreshEngine.refresh(), 500);
         } else {
-            this.walletsContainer.innerHTML = '<div class="empty-state"><p>NO ACTIVE SESSION OR EXCHANGES. CLICK "ADD_EXCHANGE" TO INITIALIZE.</p></div>';
+            this.walletsContainer.innerHTML = `<div class="empty-state"><p>${window.i18n ? window.i18n.t('no_exchange_configured') : 'NO ACTIVE SESSION OR EXCHANGES. CLICK "ADD_EXCHANGE" TO INITIALIZE.'}</p></div>`;
         }
     }
 
@@ -204,7 +215,7 @@ class DashboardManager {
             if (!finalAddr) {
                 addrInput.classList.add('input-error');
                 const vm = document.getElementById('wallet-addr-validation');
-                if (vm) { vm.textContent = '⚠ No address provided and no wallet connected'; vm.classList.add('show'); }
+                if (vm) { vm.textContent = window.i18n ? window.i18n.t('err_no_address') : '⚠ No address provided and no wallet connected'; vm.classList.add('show'); }
                 return;
             }
 
@@ -218,7 +229,7 @@ class DashboardManager {
                 console.log('Duplicate detected:', { exc, finalAddr, currentExchanges: window.walletManager.state.activeExchanges });
                 addrInput.classList.add('input-error');
                 const vm = document.getElementById('wallet-addr-validation');
-                if (vm) { vm.textContent = '⚠ This wallet is already added for this exchange'; vm.classList.add('show'); }
+                if (vm) { vm.textContent = window.i18n ? window.i18n.t('err_already_added') : '⚠ This wallet is already added for this exchange'; vm.classList.add('show'); }
                 return;
             }
 
@@ -237,7 +248,7 @@ class DashboardManager {
                 addrInput.classList.remove('input-error');
             }
             const vm = document.getElementById('wallet-addr-validation');
-            if (vm) { vm.classList.remove('show'); vm.textContent = '⚠ Invalid address — must be 42 chars starting with 0x'; }
+            if (vm) { vm.classList.remove('show'); vm.textContent = window.i18n ? window.i18n.t('err_invalid_address') : '⚠ Invalid address — must be 42 chars starting with 0x'; }
             this.exchangeSelect.value = '';
             this.extendedConfigGroup.style.display = 'none';
             document.getElementById('multi-wallet-group').style.display = 'none';
@@ -339,13 +350,13 @@ class DashboardManager {
     }
 
     renderLoading() {
-        this.walletsContainer.innerHTML = '<div class="empty-state"><p>SYNCHRONIZING EXCHANGE ACCOUNTS...</p></div>';
+        this.walletsContainer.innerHTML = `<div class="empty-state"><p>${window.i18n ? window.i18n.t('syncing') : 'SYNCHRONIZING EXCHANGE ACCOUNTS...'}</p></div>`;
     }
 
     updateAllWalletCards(results) {
         this.walletsContainer.innerHTML = '';
         if (!results || results.length === 0) {
-            this.walletsContainer.innerHTML = '<div class="empty-state"><p>NO EXCHANGES ADDED.</p></div>';
+            this.walletsContainer.innerHTML = `<div class="empty-state"><p>${window.i18n ? window.i18n.t('no_exchanges') : 'NO EXCHANGES ADDED.'}</p></div>`;
             return;
         }
 
@@ -382,7 +393,7 @@ class DashboardManager {
                     <button class="remove-btn" onclick="window.dashboardMgr.removeWallet('${id}')">×</button>
                 </div>
                 <div class="card-body error-text" style="padding:20px; color:#ff6b6b;">
-                    SYNC ERROR: ${error || 'Connection Failed'}
+                    SYNC ERROR: ${error || (window.i18n ? window.i18n.t('failed_sync') : 'Connection Failed')}
                 </div>`;
             return card;
         }
@@ -430,10 +441,25 @@ class DashboardManager {
     }
 
     removeWallet(id) {
+        const entryToRemove = window.walletManager.state.activeExchanges.find(e => e.id === id);
+        if (entryToRemove) {
+            const eAddr = (entryToRemove.walletAddress || '').toLowerCase();
+            const duplicates = window.walletManager.state.activeExchanges.filter(e => 
+                e.exchange === entryToRemove.exchange && 
+                (e.walletAddress || '').toLowerCase() === eAddr &&
+                e.id !== id
+            );
+            duplicates.forEach(dup => {
+                console.log('Purging ghost duplicate:', dup.id);
+                window.walletManager.removeExchange(dup.id);
+                delete this.walletData[dup.id];
+            });
+        }
+
         window.walletManager.removeExchange(id);
         delete this.walletData[id];
         // Re-render only current active exchanges — do NOT show removed ones
-        const remaining = window.walletManager.state.activeExchanges.map(e => ({...e, success: false, error: 'Refreshing...'}));
+        const remaining = window.walletManager.state.activeExchanges.map(e => ({...e, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...'}));
         this.updateAllWalletCards(remaining);
         window.refreshEngine.refresh();
     }

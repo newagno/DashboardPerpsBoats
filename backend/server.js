@@ -229,9 +229,10 @@ app.post('/api/exchanges/nado/stats', async (req, res) => {
             }
         }
 
-        // 3. INIT_DEPOSIT via collateral events (delta = post - pre balance for product_id 0)
+        // 3. INIT_DEPOSIT via collateral events (delta = post - pre spot balance)
+        //    No product_id filter — captures both USDT0 (id:0) and USDC (id:5) deposits
         const evRes = await http.post('https://archive.prod.nado.xyz/v1', {
-            events: { subaccounts: [sender], product_ids: [0], event_types: ['deposit_collateral', 'withdraw_collateral', 'transfer_quote'], limit: { raw: 500 } }
+            events: { subaccounts: [sender], event_types: ['deposit_collateral', 'withdraw_collateral', 'transfer_quote'], limit: { raw: 500 } }
         }, { headers: archiveHeaders }).catch(() => ({ data: {} }));
 
         let initDepositFromEvents = 0;

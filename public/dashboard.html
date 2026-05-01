@@ -11,6 +11,8 @@
     <link rel="stylesheet" href="css/dashboard.css">
 </head>
 <body class="dashboard-body">
+    <!-- Particle Background -->
+    <canvas id="particle-canvas"></canvas>
     <div class="app-container">
         <!-- Sidebar or Header -->
         <header class="dash-header">
@@ -61,6 +63,10 @@
                     <span class="label">04 // TOTAL_VOLUME</span>
                     <span id="total-volume" class="value">$0.00</span>
                 </div>
+                <div class="summary-card">
+                    <span class="label">05 // $/POINT</span>
+                    <span id="total-point-value" class="value" style="color: rgba(255,72,54,0.9);">N/A</span>
+                </div>
             </section>
 
 
@@ -110,6 +116,7 @@
                         <label for="wallet-address-input">Wallet Address</label>
                         <input type="text" id="wallet-address-input" list="wallet-address-history" placeholder="0x..." autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
                         <datalist id="wallet-address-history"></datalist>
+                        <div id="wallet-addr-validation" class="validation-msg">⚠ Invalid address — must be 42 chars starting with 0x</div>
                     </div>
 
                     <!-- 2. Extended API Key (only for Extended) -->
@@ -151,6 +158,12 @@
                 <button class="btn-primary" onclick="document.getElementById('easter-egg-modal').style.display='none'">ACKNOWLEDGE</button>
             </div>
         </div>
+    </div>
+
+    <!-- Fortune Cookie Popup -->
+    <div id="fortune-popup">
+        <div class="fortune-hint">🔐 VAULT / ORACLE_OUTPUT</div>
+        <div class="fortune-text" id="fortune-text"></div>
     </div>
 
     <!-- Loading Spinner -->

@@ -342,16 +342,25 @@ class DashboardManager {
         // Mobile touch events for drag and drop
         let startX, startY, initialX, initialY;
         key.addEventListener('touchstart', (e) => {
+            // Prevent default browser behavior (scrolling, image drag)
+            e.preventDefault();
             const touch = e.touches[0];
             startX = touch.clientX;
             startY = touch.clientY;
+            
             const rect = key.getBoundingClientRect();
             initialX = rect.left;
             initialY = rect.top;
+            
+            // Lock dimensions
+            key.style.width = rect.width + 'px';
+            key.style.height = rect.height + 'px';
+            
             key.style.position = 'fixed';
             key.style.zIndex = '9999';
             key.style.left = initialX + 'px';
             key.style.top = initialY + 'px';
+            key.style.transition = 'none';
         }, { passive: false });
 
         key.addEventListener('touchmove', (e) => {
@@ -359,10 +368,12 @@ class DashboardManager {
             const touch = e.touches[0];
             const dx = touch.clientX - startX;
             const dy = touch.clientY - startY;
+            // Using translate for hardware acceleration
             key.style.transform = `translate(${dx}px, ${dy}px)`;
         }, { passive: false });
 
         key.addEventListener('touchend', (e) => {
+            e.preventDefault();
             const touch = e.changedTouches[0];
             const chestRect = chest.getBoundingClientRect();
             
@@ -378,7 +389,10 @@ class DashboardManager {
             key.style.zIndex = '';
             key.style.left = '';
             key.style.top = '';
+            key.style.width = '';
+            key.style.height = '';
             key.style.transform = '';
+            key.style.transition = '';
         });
     }
 

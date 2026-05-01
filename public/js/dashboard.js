@@ -33,28 +33,36 @@ class DashboardManager {
             H = canvas.height = window.innerHeight;
         });
 
-        const COUNT = 55;
+        // Reduce count for mobile devices to save battery and CPU
+        const isMobile = window.innerWidth < 768;
+        const COUNT = isMobile ? 25 : 55;
+        
         const particles = Array.from({ length: COUNT }, () => ({
             x: Math.random() * W,
             y: Math.random() * H,
             r: Math.random() * 1.5 + 0.4,
-            dx: (Math.random() - 0.5) * 0.3,
-            dy: (Math.random() - 0.5) * 0.3,
-            alpha: Math.random() * 0.5 + 0.1
+            dx: (Math.random() - 0.5) * 0.25, // Slightly slower for better feel
+            dy: (Math.random() - 0.5) * 0.25,
+            alpha: Math.random() * 0.4 + 0.1
         }));
 
         const draw = () => {
             ctx.clearRect(0, 0, W, H);
+            ctx.fillStyle = 'rgba(255, 72, 54, 0.2)'; // Use a single color for speed
+            
             for (const p of particles) {
                 ctx.beginPath();
                 ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(255,72,54,${p.alpha})`;
+                ctx.globalAlpha = p.alpha;
                 ctx.fill();
+                
                 p.x += p.dx;
                 p.y += p.dy;
+                
                 if (p.x < 0 || p.x > W) p.dx *= -1;
                 if (p.y < 0 || p.y > H) p.dy *= -1;
             }
+            ctx.globalAlpha = 1.0;
             requestAnimationFrame(draw);
         };
         draw();

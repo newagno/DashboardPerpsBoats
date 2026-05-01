@@ -6,6 +6,9 @@
     <title>Trading Dashboard | Secure Monitoring</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://esm.run" crossorigin>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="preconnect" href="https://cdn.ethers.io" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="icon" href="/assets/key.png" type="image/png">
     <link rel="stylesheet" href="css/dashboard.css">
@@ -24,7 +27,7 @@
                 <span id="last-update" class="timestamp">UTC / 0000-00-00</span>
                 
                 <div class="chest-container" id="treasure-chest">
-                    <img src="assets/chest_premium.png" alt="VAULT" class="chest-icon" id="chest-img">
+                    <img src="assets/chest_premium.png" alt="VAULT" class="chest-icon" id="chest-img" loading="lazy" fetchpriority="high">
                 </div>
                 
                 <div id="wallet-auth-container" style="display: flex; gap: 10px;">
@@ -173,7 +176,7 @@
     </div>
 
     <!-- Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js" defer></script>
     <script type="module">
         import { createAppKit } from 'https://esm.run/@reown/appkit'
         import { EthersAdapter } from 'https://esm.run/@reown/appkit-adapter-ethers'
@@ -200,11 +203,11 @@
 
         window.appKit = appKit;
     </script>
-    <script src="https://cdn.ethers.io/lib/ethers-5.7.umd.min.js"></script>
-    <script src="js/walletManager.js"></script>
-    <script src="js/exchanges.js"></script>
-    <script src="js/utils.js"></script>
-    <script src="js/refreshEngine.js"></script>
-    <script src="js/dashboard.js"></script>
+    <script src="https://cdn.ethers.io/lib/ethers-5.7.umd.min.js" defer></script>
+    <script src="js/walletManager.js" defer></script>
+    <script src="js/exchanges.js" defer></script>
+    <script src="js/utils.js" defer></script>
+    <script src="js/refreshEngine.js" defer></script>
+    <script src="js/dashboard.js" defer></script>
 </body>
 </html>

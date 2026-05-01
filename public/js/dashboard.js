@@ -12,6 +12,19 @@ class DashboardManager {
 
         this.walletData = {};
 
+        // Helper to close modal and reset state
+        this.closeModal = () => {
+            this.modalAddExchange.style.display = 'none';
+            // Reset validation states
+            const addrInput = document.getElementById('wallet-address-input');
+            const vm = document.getElementById('wallet-addr-validation');
+            if (addrInput) addrInput.classList.remove('input-error');
+            if (vm) {
+                vm.classList.remove('show');
+                vm.textContent = '⚠ Invalid address — must be 42 chars starting with 0x';
+            }
+        };
+
         // ── Particles ───────────────────────────────────────────────────────
         this.initParticles();
         // ── Interactive Key tracking ────────────────────────────────────────
@@ -115,6 +128,16 @@ class DashboardManager {
 
     setupEventListeners() {
         this.btnAddExchange.addEventListener('click', () => {
+            // Reset modal fields before showing
+            this.exchangeSelect.value = '';
+            const addrInput = document.getElementById('wallet-address-input');
+            const labelInput = document.getElementById('wallet-label-input');
+            if (addrInput) addrInput.value = '';
+            if (labelInput) labelInput.value = '';
+            this.extendedConfigGroup.style.display = 'none';
+            document.getElementById('multi-wallet-group').style.display = 'none';
+            document.getElementById('label-group').style.display = 'none';
+            
             this.modalAddExchange.style.display = 'flex';
         });
 
@@ -126,7 +149,21 @@ class DashboardManager {
         });
 
         document.querySelectorAll('.btn-close-modal').forEach(btn => {
-            btn.addEventListener('click', () => { this.modalAddExchange.style.display = 'none'; });
+            btn.addEventListener('click', () => { this.closeModal(); });
+        });
+
+        // ── Keyboard Esc listener ──────────────────────────────────────────
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.modalAddExchange.style.display === 'flex') {
+                this.closeModal();
+            }
+        });
+
+        // ── Click outside listener (backdrop) ──────────────────────────────
+        this.modalAddExchange.addEventListener('mousedown', (e) => {
+            if (e.target === this.modalAddExchange) {
+                this.closeModal();
+            }
         });
 
         // ── Real-time address validation ───────────────────────────────────
@@ -159,11 +196,26 @@ class DashboardManager {
             }
 
             // ── Duplicate check (case-insensitive) ────────────────────────
-            const norm = (walletAddr || '').toLowerCase();
-            const isDup = window.walletManager.state.activeExchanges.some(
-                e => e.exchange === exc && (e.walletAddress || '').toLowerCase() === norm
-            );
+            // Logic must match walletManager.addExchange exactly
+            const sessionAddr = (window.walletManager.state.address || '').toLowerCase();
+            const inputAddr   = (walletAddr || '').toLowerCase();
+            const finalAddr   = inputAddr || sessionAddr;
+            
+            if (!finalAddr) {
+                addrInput.classList.add('input-error');
+                const vm = document.getElementById('wallet-addr-validation');
+                if (vm) { vm.textContent = '⚠ No address provided and no wallet connected'; vm.classList.add('show'); }
+                return;
+            }
+
+            const isDup = window.walletManager.state.activeExchanges.some(e => {
+                // Entries might have null walletAddress if they were added via session
+                const eAddr = (e.walletAddress || sessionAddr).toLowerCase();
+                return e.exchange === exc && eAddr === finalAddr;
+            });
+
             if (isDup) {
+                console.log('Duplicate detected:', { exc, finalAddr, currentExchanges: window.walletManager.state.activeExchanges });
                 addrInput.classList.add('input-error');
                 const vm = document.getElementById('wallet-addr-validation');
                 if (vm) { vm.textContent = '⚠ This wallet is already added for this exchange'; vm.classList.add('show'); }

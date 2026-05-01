@@ -114,10 +114,7 @@ class WalletManager {
      */
     addExchange(exchange, walletAddress = null, label = null) {
         const addr = (walletAddress || this.state.address || '').toLowerCase();
-        // Prevent exact duplicate (same exchange + same address)
-        const isDuplicate = this.state.activeExchanges.some(
-            e => e.exchange === exchange && (e.walletAddress || this.state.address || '').toLowerCase() === addr
-        );
+        
         const entry = {
             id: exchange + '_' + addr.slice(2, 8) + '_' + Date.now(),
             exchange,

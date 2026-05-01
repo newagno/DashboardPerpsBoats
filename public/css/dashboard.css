@@ -91,6 +91,13 @@ body::after {
     height: 60px;
     width: auto;
     cursor: pointer;
+    filter: sepia(1) saturate(2) hue-rotate(-20deg) brightness(0.9);
+    transition: filter 0.3s ease, transform 0.2s ease;
+}
+
+.chest-icon:hover {
+    filter: sepia(1) saturate(3) hue-rotate(-20deg) brightness(1.1) drop-shadow(0 0 8px rgba(218, 91, 79, 0.7));
+    transform: scale(1.05);
 }
 
 .chest-container {

@@ -202,104 +202,86 @@ app.post('/api/exchanges/nado/stats', async (req, res) => {
         const sender = '0x' + hexAddr + nameHex;
 
         let totalEquity = 0;
-        let totalVolume = 0;
         let pnlFromTrades = 0;
         let wins = 0, totalClosed = 0;
 
-        // 1. Fetch balance (Total Equity) - Nado uses product_id = 0 for USDT and 5 for USDC
+        // 1. Fetch balance (Total Equity)
         const subRes = await http.get(`https://gateway.prod.nado.xyz/v1/query?type=subaccount_info&subaccount=${sender}`).catch(() => ({ data: {} }));
         const spotBalances = subRes.data?.data?.spot_balances || subRes.data?.spot_balances || [];
         for (const b of spotBalances) {
             if (b && (b.product_id === 0 || b.product_id === 5)) {
-                const amount = parseFloat(b.balance?.amount || b.amount || 0);
-                totalEquity += amount / 1e18;
+                totalEquity += parseFloat(b.balance?.amount || b.amount || 0) / 1e18;
             }
         }
 
-        // 2. Fetch all orders for VOLUME, PNL, WIN_RATE
-        let allOrders = [];
-        let cursor = null;
-        let hasMore = true;
+        // 2. Snapshot (active:false) => VOLUME (sum quote_volume_cumulative per product) + INIT_DEPOSIT fallback
+        const snapRes = await http.post('https://archive.prod.nado.xyz/v1', {
+            account_snapshots: { subaccounts: [sender], timestamps: [Date.now() * 1000000], active: false }
+        }, { headers: archiveHeaders }).catch(() => ({ data: {} }));
+
+        let totalVolumeFromSnap = 0, initDepositFromSnap = 0;
+        const snapData = snapRes.data?.snapshots?.[sender];
+        if (snapData) {
+            const arr = snapData[Object.keys(snapData)[0]] || [];
+            for (const item of arr) {
+                if (item.product_id !== 0) totalVolumeFromSnap += parseFloat(item.quote_volume_cumulative || 0) / 1e18;
+                else initDepositFromSnap = parseFloat(item.net_entry_cumulative || 0) / 1e18;
+            }
+        }
+
+        // 3. INIT_DEPOSIT via collateral events (delta = post - pre balance for product_id 0)
+        const evRes = await http.post('https://archive.prod.nado.xyz/v1', {
+            events: { subaccounts: [sender], product_ids: [0], event_types: ['deposit_collateral', 'withdraw_collateral', 'transfer_quote'], limit: { raw: 500 } }
+        }, { headers: archiveHeaders }).catch(() => ({ data: {} }));
+
+        let initDepositFromEvents = 0;
+        const evts = evRes.data?.events || [];
+        for (const ev of evts) {
+            const pre  = BigInt(ev.pre_balance?.spot?.balance?.amount  || 0);
+            const post = BigInt(ev.post_balance?.spot?.balance?.amount || 0);
+            initDepositFromEvents += Number(post - pre) / 1e18;
+        }
+        const initDeposit = evts.length > 0 ? initDepositFromEvents : initDepositFromSnap;
+
+        // 4. Orders for PNL + WIN_RATE
+        let allOrders = [], cursor = null, hasMore = true;
         const startTime = Date.now();
         for (let i = 0; i < 200; i++) {
-            if (!hasMore || (Date.now() - startTime > 8500)) break; // Safety break at 8.5s
+            if (!hasMore || (Date.now() - startTime > 8000)) break;
             const pld = { orders: { subaccounts: [sender], limit: 100 } };
             if (cursor) pld.orders.idx = cursor;
-            
             const r = await http.post('https://archive.prod.nado.xyz/v1', pld, { headers: archiveHeaders }).catch(() => null);
             const batch = r?.data?.orders || [];
-            if (batch.length > 0) {
-                cursor = batch[batch.length - 1].submission_idx;
-                allOrders = allOrders.concat(batch);
-                if (batch.length < 100) hasMore = false;
-            } else {
-                hasMore = false;
-            }
+            if (batch.length > 0) { cursor = batch[batch.length-1].submission_idx; allOrders = allOrders.concat(batch); if (batch.length < 100) hasMore = false; }
+            else hasMore = false;
         }
 
         for (const o of allOrders) {
-            totalVolume += Math.abs(parseFloat(o.quote_filled) || 0) / 1e18;
             const rpnl = (parseFloat(o.realized_pnl) || 0) / 1e18;
-            const fee = (parseFloat(o.fee) || 0) / 1e18;
+            const fee  = (parseFloat(o.fee) || 0) / 1e18;
             pnlFromTrades += (rpnl - fee);
-            
-            if ((parseFloat(o.realized_pnl) || 0) !== 0) {
-                totalClosed++;
-                if (rpnl > 0) wins++;
-            }
+            if ((parseFloat(o.realized_pnl) || 0) !== 0) { totalClosed++; if (rpnl > 0) wins++; }
         }
-        
         const winRate = totalClosed > 0 ? (wins / totalClosed) * 100 : 0;
 
-        // 3. Points & Rank & PNL/Volume from Points API
+        // 5. Points & Rank
         const pointsRes = await http.post('https://archive.prod.nado.xyz/v1', {
             nado_points: { address: targetAddress }
         }, { headers: archiveHeaders }).catch(() => ({ data: {} }));
-        
-        // 4. Initial Deposit from Subaccount Snapshots
-        const snapRes = await http.post('https://archive.prod.nado.xyz/v1', {
-            account_snapshots: {
-                subaccounts: [sender],
-                timestamps: [Date.now() * 1000000],
-                active: true
-            }
-        }, { headers: archiveHeaders }).catch(() => ({ data: {} }));
-        
-        let initDeposit = 0;
-        const snapData = snapRes.data?.snapshots?.[sender];
-        if (snapData) {
-            const tsKey = Object.keys(snapData)[0];
-            if (tsKey && snapData[tsKey]) {
-                const prod0 = snapData[tsKey].find(a => a.product_id === 0);
-                if (prod0 && prod0.net_entry_cumulative) {
-                    initDeposit = parseFloat(prod0.net_entry_cumulative) / 1e18;
-                }
-            }
-        }
-        
-        // If snapshot endpoint fails, fallback to equity - pnl
         const allTime = pointsRes.data?.all_time_points || {};
         const totalPoints = parseFloat(allTime.points || 0);
         const rank = allTime.rank ? parseInt(allTime.rank) : null;
-        
-        const apiPnl = allTime.pnl ? parseFloat(allTime.pnl) / 1e18 : null;
-        const finalPnl = apiPnl !== null ? apiPnl : pnlFromTrades;
-        
-        // Calculate net deposit using final PNL if snapRes failed
-        const netDeposit = initDeposit !== 0 ? initDeposit : (totalEquity - finalPnl);
 
-        // VOLUME: use API volume as primary since pagination limit might truncate actual trade volume
-        const apiVolume = allTime.volume ? parseFloat(allTime.volume) / 1e18 : null;
-        const finalVolume = apiVolume !== null ? apiVolume : totalVolume;
+        const finalVolume = totalVolumeFromSnap;
+        const finalPnl    = pnlFromTrades;
 
-        console.log(`[Nado] Orders: ${allOrders.length}, Volume from orders: $${(totalVolume || 0).toFixed(2)}, API volume: $${apiVolume !== null ? apiVolume.toFixed(2) : 'N/A'}, Final: $${(finalVolume || 0).toFixed(2)}`);
+        console.log('[Nado] SnapVol: $' + totalVolumeFromSnap.toFixed(2) + ', Orders: ' + allOrders.length + ', InitDep(events,' + evts.length + '): $' + initDepositFromEvents.toFixed(2) + ', InitDep(snap): $' + initDepositFromSnap.toFixed(2) + ', Used: $' + initDeposit.toFixed(2));
 
         res.json({
             snapshot: { assets: totalEquity },
             matches: allOrders,
             points: totalPoints,
-            // Pre-computed fields for frontend
-            init_deposit: netDeposit,
+            init_deposit: initDeposit,
             act_deposit: totalEquity,
             total_volume: finalVolume,
             pnl: finalPnl,

@@ -11,8 +11,46 @@ class RefreshEngine {
     }
 
     start() {
+        this.loadFromCache();
         this.refresh();
         this.timerId = setInterval(() => this.refresh(), this.interval);
+    }
+
+    loadFromCache() {
+        try {
+            const cacheStr = localStorage.getItem('exchange_cache_v1');
+            if (!cacheStr) return;
+            const cache = JSON.parse(cacheStr);
+            const cachedResults = [];
+            
+            const exchangeEntries = window.walletManager.state.activeExchanges || [];
+            exchangeEntries.forEach(entry => {
+                if (entry.exchange === 'variational') {
+                    const md = entry.manualData;
+                    if (md) {
+                        const data = {
+                            init_deposit: md.initDeposit || 0,
+                            act_deposit:  md.actDeposit  || 0,
+                            total_volume: md.volume      || 0,
+                            points:       md.points      || 0,
+                            rank:         md.rank        || null,
+                            win_rate:     md.winRate     || 0,
+                            _inputDate:   md.inputDate   || null
+                        };
+                        cachedResults.push({ id: entry.id, exchange: entry.exchange, walletAddress: entry.walletAddress, label: entry.label, data, success: true });
+                    }
+                } else if (cache[entry.id]) {
+                    cachedResults.push(cache[entry.id]);
+                }
+            });
+            
+            if (cachedResults.length > 0) {
+                window.dashboardMgr.updateAllWalletCards(cachedResults);
+                document.getElementById('last-update').textContent = `Cached data loaded`;
+            }
+        } catch (e) {
+            console.error("Failed to load cache", e);
+        }
     }
 
     stop() {
@@ -59,14 +97,22 @@ class RefreshEngine {
                     const obj = new window.Exchanges.Nado(effectiveAddress);
                     data = await obj.getStats();
                 } else if (exchange === 'variational') {
-                    const vrToken = window.walletManager.getVariationalToken(id);
-                    if (!vrToken) {
-                        console.warn(`Ghost entry detected for variational (id: ${id}). Removing.`);
+                    // Manual data short-circuit — no API call, read from stored entry
+                    if (!entry.manualData) {
+                        console.warn(`Variational entry ${id} has no manualData. Removing.`);
                         window.walletManager.removeExchange(id);
                         return null;
                     }
-                    const obj = new window.Exchanges.Variational(effectiveAddress, vrToken);
-                    data = await obj.getStats();
+                    const md = entry.manualData;
+                    data = {
+                        init_deposit: md.initDeposit || 0,
+                        act_deposit:  md.actDeposit  || 0,
+                        total_volume: md.volume      || 0,
+                        points:       md.points      || 0,
+                        rank:         md.rank        || null,
+                        win_rate:     md.winRate     || 0,
+                        _inputDate:   md.inputDate   || null
+                    };
                 } else {
                     return null;
                 }
@@ -79,6 +125,20 @@ class RefreshEngine {
         });
 
         const results = (await Promise.all(refreshPromises)).filter(r => r !== null);
+
+        // Update cache
+        try {
+            const cacheStr = localStorage.getItem('exchange_cache_v1');
+            const cache = cacheStr ? JSON.parse(cacheStr) : {};
+            results.forEach(r => {
+                if (r.success && r.exchange !== 'variational') {
+                    cache[r.id] = r;
+                }
+            });
+            localStorage.setItem('exchange_cache_v1', JSON.stringify(cache));
+        } catch (e) {
+            console.error("Failed to update cache", e);
+        }
 
         window.dashboardMgr.updateAllWalletCards(results);
         window.dashboardMgr.updateSummary();

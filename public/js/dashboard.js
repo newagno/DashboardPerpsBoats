@@ -154,8 +154,10 @@ class DashboardManager {
 
         this.exchangeSelect.addEventListener('change', (e) => {
             const v = e.target.value;
-            this.extendedConfigGroup.style.display = v === 'extended' ? 'block' : 'none';
-            document.getElementById('multi-wallet-group').style.display = v ? 'block' : 'none';
+            const isVar = v === 'variational';
+            this.extendedConfigGroup.style.display  = (v === 'extended') ? 'block' : 'none';
+            document.getElementById('variational-config-group').style.display = isVar  ? 'block' : 'none';
+            document.getElementById('multi-wallet-group').style.display = (v && !isVar) ? 'block' : 'none';
             document.getElementById('label-group').style.display = v ? 'block' : 'none';
         });
 
@@ -193,8 +195,33 @@ class DashboardManager {
             const exc = this.exchangeSelect.value;
             if (!exc) return;
             const labelInput = document.getElementById('wallet-label-input');
-            const addrInput  = document.getElementById('wallet-address-input');
             const label      = labelInput?.value.trim();
+
+            // ── Variational manual path ────────────────────────────────────
+            if (exc === 'variational') {
+                const manualData = {
+                    initDeposit: parseFloat(document.getElementById('var-init-deposit').value) || 0,
+                    actDeposit:  parseFloat(document.getElementById('var-act-deposit').value)  || 0,
+                    volume:      parseFloat(document.getElementById('var-volume').value)        || 0,
+                    points:      parseFloat(document.getElementById('var-points').value)        || 0,
+                    rank:        document.getElementById('var-rank').value.trim() || null,
+                    winRate:     parseFloat(document.getElementById('var-win-rate').value) || 0
+                };
+                window.walletManager.addVariationalManual(manualData, label);
+                ['var-init-deposit','var-act-deposit','var-volume','var-points','var-rank','var-win-rate'].forEach(fid => {
+                    const el = document.getElementById(fid); if (el) el.value = '';
+                });
+                if (labelInput) labelInput.value = '';
+                document.getElementById('variational-config-group').style.display = 'none';
+                document.getElementById('label-group').style.display = 'none';
+                this.exchangeSelect.value = '';
+                this.modalAddExchange.style.display = 'none';
+                window.refreshEngine.refresh();
+                return;
+            }
+
+            // ── Standard path (Extended / Nado) ───────────────────────────
+            const addrInput  = document.getElementById('wallet-address-input');
             const walletAddr = addrInput?.value.trim();
 
             // ── Validate address ───────────────────────────────────────────
@@ -207,11 +234,10 @@ class DashboardManager {
             }
 
             // ── Duplicate check (case-insensitive) ────────────────────────
-            // Logic must match walletManager.addExchange exactly
             const sessionAddr = (window.walletManager.state.address || '').toLowerCase();
             const inputAddr   = (walletAddr || '').toLowerCase();
             const finalAddr   = inputAddr || sessionAddr;
-            
+
             if (!finalAddr) {
                 addrInput.classList.add('input-error');
                 const vm = document.getElementById('wallet-addr-validation');
@@ -220,7 +246,6 @@ class DashboardManager {
             }
 
             const isDup = window.walletManager.state.activeExchanges.some(e => {
-                // Entries might have null walletAddress if they were added via session
                 const eAddr = (e.walletAddress || sessionAddr).toLowerCase();
                 return e.exchange === exc && eAddr === finalAddr;
             });
@@ -261,6 +286,16 @@ class DashboardManager {
 
         document.getElementById('refresh-btn').addEventListener('click', () => {
             window.refreshEngine.refresh();
+        });
+
+        // ── Edit Variational modal listeners ───────────────────────────────
+        const editVarModal = document.getElementById('modal-edit-variational');
+        document.getElementById('close-edit-variational').addEventListener('click', () => { editVarModal.style.display = 'none'; });
+        document.getElementById('close-edit-variational-cancel').addEventListener('click', () => { editVarModal.style.display = 'none'; });
+        editVarModal.addEventListener('mousedown', (e) => { if (e.target === editVarModal) editVarModal.style.display = 'none'; });
+        document.getElementById('btn-save-variational-edit').addEventListener('click', () => this.saveVariationalEdit());
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && editVarModal.style.display === 'flex') editVarModal.style.display = 'none';
         });
     }
 
@@ -413,6 +448,7 @@ class DashboardManager {
             }
             this.walletsContainer.appendChild(this.createExchangeCard(res));
         });
+        this.setupDragAndDrop();
         this.updateSummary();
     }
 
@@ -420,6 +456,7 @@ class DashboardManager {
         const { id, exchange, walletAddress, label, success, error } = res;
         const card = document.createElement('div');
         card.className = 'wallet-card';
+        card.dataset.id = id;
         const excName   = exchange.charAt(0).toUpperCase() + exchange.slice(1);
         const addrShort = window.Utils.truncateAddress(walletAddress || '');
 
@@ -427,12 +464,12 @@ class DashboardManager {
         if (exchange === 'nado')     logoUrl = 'assets/nado.png';
         else if (exchange === 'extended') logoUrl = 'assets/Extended.png';
 
-        const logoHtml  = logoUrl ? `<img src="${logoUrl}" style="width: 18px; height: 18px; border-radius: 50%; vertical-align: middle; margin-right: 8px;">` : '';
+        const logoHtml  = logoUrl ? `<img src="${logoUrl}" style="width: 18px; height: 18px; border-radius: 50%; vertical-align: middle; margin-right: 8px;">` : `<div style="width: 18px; height: 18px; margin-right: 8px;"></div>`;
         const labelHtml = label    ? `<span class="wallet-label" style="background: rgba(255,255,255,0.1); padding: 2px 6px; font-size: 0.8em; margin-left: 10px; border: 1px solid rgba(255,255,255,0.2);">${label}</span>` : '';
 
         if (!success) {
             card.innerHTML = `
-                <div class="card-header" style="display: flex; align-items: center;">
+                <div class="card-header" style="display: flex; align-items: center; min-height: 38px;">
                     ${logoHtml}
                     <span class="exchange-badge">${excName}</span>
                     ${labelHtml}
@@ -449,9 +486,6 @@ class DashboardManager {
         const pnlClass = (data.pnl || 0) >= 0 ? 'positive' : 'negative';
 
         // ── $/POINT metric ─────────────────────────────────────────────────
-        // Logic: how much capital you "paid" per point earned
-        // When PNL < 0 (loss): cost = |PNL| / points  (each point cost you $X in losses)
-        // When PNL >= 0 (profit): cost = 0 — points are "free", you made money AND earned points
         let pointValue = 'FREE';
         if (data.points && data.points > 0) {
             if (data.pnl < 0) {
@@ -463,26 +497,42 @@ class DashboardManager {
             pointValue = 'N/A';
         }
 
+        // Variational: show inputDate from manualData on page load; other exchanges show real-time sync
+        let footerTimestamp;
+        if (exchange === 'variational' && res.data && res.data._inputDate) {
+            const inputD = new Date(res.data._inputDate);
+            const dateStr = inputD.toLocaleDateString() + ' ' + inputD.toLocaleTimeString();
+            footerTimestamp = `${window.i18n ? window.i18n.t('var_input_date') : 'Data entered'}: ${dateStr}`;
+        } else {
+            footerTimestamp = `Last sync: ${new Date().toLocaleTimeString()}`;
+        }
+
+        // Edit button (only for Variational)
+        const editBtnHtml = (exchange === 'variational')
+            ? `<button class="btn-icon" title="${window.i18n ? window.i18n.t('var_edit_btn') : 'Edit data'}" onclick="window.dashboardMgr.openEditVariational('${id}')" style="padding: 4px; margin-left: 8px; display: flex; align-items: center; color: var(--text-muted);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>`
+            : '';
+
         card.innerHTML = `
-            <div class="card-header" style="display: flex; align-items: center;">
+            <div class="card-header" style="display: flex; align-items: center; min-height: 38px;">
                 ${logoHtml}
                 <span class="exchange-badge">${excName}</span>
                 ${labelHtml}
                 <span class="wallet-address-truncated" style="margin-left: auto; margin-right: 15px;">ID: ${addrShort}</span>
+                ${editBtnHtml}
                 <button class="remove-btn" onclick="window.dashboardMgr.removeWallet('${id}')">×</button>
             </div>
             <div class="wallet-stats-grid">
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_init_deposit') : '01 // INIT_DEPOSIT'}</span><span class="stat-value">${window.Utils.formatCurrency(data.initDeposit)}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_act_deposit') : '02 // ACT_DEPOSIT'}</span><span class="stat-value">${window.Utils.formatCurrency(data.actDeposit)}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_volume') : '03 // VOLUME'}</span><span class="stat-value">${window.Utils.formatCurrency(data.volume)}</span></div>
-                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_points') : '04 // POINTS'}</span><span class="stat-value">${(data.points || 0).toLocaleString()}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_points') : '04 // POINTS'}</span><span class="stat-value">${(data.points || 0).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_rank') : '05 // RANK'}</span><span class="stat-value">${data.rank ? data.rank : 'N/A'}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_pnl') : '06 // PNL'}</span><span class="stat-value ${pnlClass}">${window.Utils.formatCurrency(data.pnl)}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_win_rate') : '07 // WIN_RATE'}</span><span class="stat-value">${window.Utils.formatPercent(data.winRate)}</span></div>
                 <div class="wallet-stat" style="border-top: 1px dashed rgba(255,72,54,0.3); margin-top:2px;"><span class="stat-label" style="color: rgba(255,72,54,0.7);">${window.i18n ? window.i18n.t('card_point_value') : '08 // $/POINT'}</span><span class="stat-value" style="color: rgba(255,72,54,0.9); font-size:12px;">${pointValue}</span></div>
             </div>
             <div class="wallet-footer">
-                <span class="timestamp">Last sync: ${new Date().toLocaleTimeString()}</span>
+                <span class="timestamp">${footerTimestamp}</span>
             </div>`;
         return card;
     }
@@ -508,6 +558,37 @@ class DashboardManager {
         // Re-render only current active exchanges — do NOT show removed ones
         const remaining = window.walletManager.state.activeExchanges.map(e => ({...e, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...'}));
         this.updateAllWalletCards(remaining);
+        window.refreshEngine.refresh();
+    }
+
+    // ── Variational Edit Modal ─────────────────────────────────────────────
+    openEditVariational(id) {
+        const entry = window.walletManager.state.activeExchanges.find(e => e.id === id);
+        if (!entry || entry.exchange !== 'variational') return;
+        const md = entry.manualData || {};
+        document.getElementById('edit-var-id').value           = id;
+        document.getElementById('edit-var-init-deposit').value = md.initDeposit || '';
+        document.getElementById('edit-var-act-deposit').value  = md.actDeposit  || '';
+        document.getElementById('edit-var-volume').value       = md.volume      || '';
+        document.getElementById('edit-var-points').value       = md.points      || '';
+        document.getElementById('edit-var-rank').value         = md.rank        || '';
+        document.getElementById('edit-var-win-rate').value     = md.winRate     || '';
+        document.getElementById('modal-edit-variational').style.display = 'flex';
+    }
+
+    saveVariationalEdit() {
+        const id = document.getElementById('edit-var-id').value;
+        if (!id) return;
+        const manualData = {
+            initDeposit: parseFloat(document.getElementById('edit-var-init-deposit').value) || 0,
+            actDeposit:  parseFloat(document.getElementById('edit-var-act-deposit').value)  || 0,
+            volume:      parseFloat(document.getElementById('edit-var-volume').value)        || 0,
+            points:      parseFloat(document.getElementById('edit-var-points').value)        || 0,
+            rank:        document.getElementById('edit-var-rank').value.trim() || null,
+            winRate:     parseFloat(document.getElementById('edit-var-win-rate').value) || 0
+        };
+        window.walletManager.updateVariationalManual(id, manualData);
+        document.getElementById('modal-edit-variational').style.display = 'none';
         window.refreshEngine.refresh();
     }
 
@@ -545,13 +626,81 @@ class DashboardManager {
 
         if (typeof d.points === 'object' || isNaN(d.points)) {
             d.points = 0;
-        } else if (exchange !== 'extended') {
-            d.points = Math.round(d.points);
         } else {
             d.points = parseFloat(d.points.toFixed(2));
         }
 
         return d;
+    }
+
+    setupDragAndDrop() {
+        const container = this.walletsContainer;
+        let draggedItem = null;
+
+        const cards = container.querySelectorAll('.wallet-card');
+        cards.forEach(card => {
+            card.setAttribute('draggable', true);
+            card.style.cursor = 'grab';
+            
+            card.addEventListener('dragstart', function(e) {
+                draggedItem = this;
+                this.style.cursor = 'grabbing';
+                setTimeout(() => this.style.opacity = '0.5', 0);
+            });
+            
+            card.addEventListener('dragend', function() {
+                setTimeout(() => {
+                    this.style.opacity = '1';
+                    this.style.cursor = 'grab';
+                    draggedItem = null;
+                }, 0);
+            });
+            
+            card.addEventListener('dragover', function(e) {
+                e.preventDefault();
+            });
+            
+            card.addEventListener('dragenter', function(e) {
+                e.preventDefault();
+                if (draggedItem !== this) this.style.transform = 'scale(1.02)';
+            });
+            
+            card.addEventListener('dragleave', function() {
+                if (draggedItem !== this) this.style.transform = 'none';
+            });
+            
+            card.addEventListener('drop', function() {
+                this.style.transform = 'none';
+                if (draggedItem && draggedItem !== this) {
+                    const allCards = [...container.querySelectorAll('.wallet-card')];
+                    const draggedIdx = allCards.indexOf(draggedItem);
+                    const thisIdx = allCards.indexOf(this);
+                    
+                    if (draggedIdx < thisIdx) {
+                        this.parentNode.insertBefore(draggedItem, this.nextSibling);
+                    } else {
+                        this.parentNode.insertBefore(draggedItem, this);
+                    }
+                    window.dashboardMgr.saveCardOrder();
+                }
+            });
+        });
+    }
+
+    saveCardOrder() {
+        const cards = this.walletsContainer.querySelectorAll('.wallet-card');
+        const newOrderIds = Array.from(cards).map(card => card.dataset.id);
+        
+        const newExchanges = [];
+        newOrderIds.forEach(id => {
+            const entry = window.walletManager.state.activeExchanges.find(e => e.id === id);
+            if (entry) newExchanges.push(entry);
+        });
+        
+        if (newExchanges.length === window.walletManager.state.activeExchanges.length) {
+            window.walletManager.state.activeExchanges = newExchanges;
+            window.walletManager._saveExchanges();
+        }
     }
 
     updateSummary() {

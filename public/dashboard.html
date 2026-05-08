@@ -112,11 +112,11 @@
                             <option value="" disabled selected data-i18n="select_exchange">Select Exchange</option>
                             <option value="extended">Extended Exchange (Starknet)</option>
                             <option value="nado">Nado (Ink L2)</option>
-                            <!-- Variational integration disabled -->
+                            <option value="variational">Variational (Manual)</option>
                         </select>
                     </div>
 
-                    <!-- 1. Wallet Address (always first) -->
+                    <!-- 1. Wallet Address (only for non-Variational) -->
                     <div id="multi-wallet-group" style="display: none; margin-bottom: 15px;">
                         <label for="wallet-address-input" data-i18n="wallet_address">Wallet Address</label>
                         <input type="text" id="wallet-address-input" list="wallet-address-history" data-i18n="wallet_placeholder" placeholder="0x..." autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
@@ -133,14 +133,42 @@
                         <input type="text" id="extended-api-key" data-i18n="api_key_placeholder" placeholder="Paste your API key here" autocomplete="new-password" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
                     </div>
 
-                    <!-- 3. Label (always last) -->
+                    <!-- 3. Variational Manual Input Fields -->
+                    <div id="variational-config-group" style="display: none; margin-bottom: 15px;">
+                        <p style="font-size: 0.8em; color: var(--text-muted, #94a3b8); margin-bottom: 10px;" data-i18n="variational_desc">Enter trading statistics manually. PNL and $/POINT will be calculated automatically.</p>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div>
+                                <label data-i18n="var_init_deposit">Initial Deposit ($)</label>
+                                <input type="number" id="var-init-deposit" placeholder="0.00" min="0" step="0.01" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                            </div>
+                            <div>
+                                <label data-i18n="var_act_deposit">Active Deposit ($)</label>
+                                <input type="number" id="var-act-deposit" placeholder="0.00" min="0" step="0.01" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                            </div>
+                            <div>
+                                <label data-i18n="var_volume">Total Volume ($)</label>
+                                <input type="number" id="var-volume" placeholder="0.00" min="0" step="0.01" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                            </div>
+                            <div>
+                                <label data-i18n="var_points">Points</label>
+                                <input type="number" id="var-points" placeholder="0" min="0" step="1" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                            </div>
+                            <div>
+                                <label data-i18n="var_rank">Rank</label>
+                                <input type="text" id="var-rank" placeholder="e.g. 42" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                            </div>
+                            <div>
+                                <label data-i18n="var_win_rate">Win Rate (%)</label>
+                                <input type="number" id="var-win-rate" placeholder="0.00" min="0" step="0.01" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. Label (always last) -->
                     <div id="label-group" style="display: none; margin-bottom: 15px;">
                         <label for="wallet-label-input" data-i18n="label_label">Label</label>
                         <input type="text" id="wallet-label-input" data-i18n="label_placeholder" placeholder="e.g. Nado Main, Trading Wallet" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
                     </div>
-
-                    <!-- Variational config (disabled) -->
-                    <div id="variational-config-group" style="display: none;"></div>
 
                     <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
                         <button type="button" class="btn-secondary btn-close-modal" data-i18n="btn_cancel">Cancel</button>
@@ -149,6 +177,49 @@
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Variational Modal -->
+    <div id="modal-edit-variational" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header">
+                <h3 data-i18n="var_edit_title">VARIATIONAL / EDIT_DATA</h3>
+                <button type="button" id="close-edit-variational" class="btn-close-modal" data-i18n="modal_close">ESC</button>
+            </div>
+            <div class="modal-body" style="padding: 20px 0;">
+                <input type="hidden" id="edit-var-id">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                        <label data-i18n="var_init_deposit">Initial Deposit ($)</label>
+                        <input type="number" id="edit-var-init-deposit" placeholder="0.00" min="0" step="0.01" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                    </div>
+                    <div>
+                        <label data-i18n="var_act_deposit">Active Deposit ($)</label>
+                        <input type="number" id="edit-var-act-deposit" placeholder="0.00" min="0" step="0.01" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                    </div>
+                    <div>
+                        <label data-i18n="var_volume">Total Volume ($)</label>
+                        <input type="number" id="edit-var-volume" placeholder="0.00" min="0" step="0.01" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                    </div>
+                    <div>
+                        <label data-i18n="var_points">Points</label>
+                        <input type="number" id="edit-var-points" placeholder="0" min="0" step="1" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                    </div>
+                    <div>
+                        <label data-i18n="var_rank">Rank</label>
+                        <input type="text" id="edit-var-rank" placeholder="e.g. 42" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                    </div>
+                    <div>
+                        <label data-i18n="var_win_rate">Win Rate (%)</label>
+                        <input type="number" id="edit-var-win-rate" placeholder="0.00" min="0" step="0.01" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+                <button type="button" id="close-edit-variational-cancel" class="btn-secondary btn-close-modal" data-i18n="btn_cancel">Cancel</button>
+                <button type="button" id="btn-save-variational-edit" class="btn-primary" data-i18n="btn_save_edit">Save Changes</button>
             </div>
         </div>
     </div>

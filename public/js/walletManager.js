@@ -108,7 +108,7 @@ class WalletManager {
 
     /**
      * Add a wallet entry.
-     * @param {string} exchange - 'extended' | 'nado' | 'variational'
+     * @param {string} exchange - 'extended' | 'nado'
      * @param {string|null} walletAddress - specific wallet address (null = use session address)
      * @param {string|null} label - display label
      */
@@ -127,6 +127,37 @@ class WalletManager {
     }
 
     /**
+     * Add a Variational exchange entry with manual data (no wallet address needed).
+     * @param {object} manualData - { initDeposit, actDeposit, volume, points, rank }
+     * @param {string|null} label - display label
+     */
+    addVariationalManual(manualData, label = null) {
+        const entry = {
+            id: 'variational_manual_' + Date.now(),
+            exchange: 'variational',
+            walletAddress: null,
+            label: label || 'Variational',
+            manualData: { ...manualData, inputDate: Date.now() }
+        };
+        this.state.activeExchanges.push(entry);
+        this._saveExchanges();
+        return { success: true, id: entry.id };
+    }
+
+    /**
+     * Update manual data for an existing Variational entry.
+     * @param {string} id - entry id
+     * @param {object} manualData - { initDeposit, actDeposit, volume, points, rank }
+     */
+    updateVariationalManual(id, manualData) {
+        const entry = this.state.activeExchanges.find(e => e.id === id);
+        if (!entry || entry.exchange !== 'variational') return false;
+        entry.manualData = { ...manualData, inputDate: Date.now() };
+        this._saveExchanges();
+        return true;
+    }
+
+    /**
      * Remove wallet entry by its unique id.
      */
     removeExchange(id) {
@@ -140,6 +171,7 @@ class WalletManager {
         if (entry?.exchange === 'variational') {
             delete this.state.variationalTokens[id];
             localStorage.removeItem('variationalToken_' + id);
+            // manualData is stored inside the entry object in activeExchanges — already removed above
         }
     }
 

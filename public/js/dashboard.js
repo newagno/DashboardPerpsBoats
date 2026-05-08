@@ -460,7 +460,11 @@ class DashboardManager {
         card.className = 'wallet-card';
         card.dataset.id = id;
         const excName   = exchange.charAt(0).toUpperCase() + exchange.slice(1);
-        const addrShort = window.Utils.truncateAddress(walletAddress || '');
+        let displayAddr = walletAddress || '';
+        if (!displayAddr && exchange === 'variational') {
+            displayAddr = id.includes('manual') ? 'MANUAL' : '';
+        }
+        const addrShort = window.Utils.truncateAddress(displayAddr);
 
         let logoUrl = '';
         if (exchange === 'nado')     logoUrl = 'assets/nado.png';

@@ -127,15 +127,16 @@ class WalletManager {
     }
 
     /**
-     * Add a Variational exchange entry with manual data (no wallet address needed).
+     * Add a Variational exchange entry with manual data.
      * @param {object} manualData - { initDeposit, actDeposit, volume, points, rank }
+     * @param {string|null} walletAddress - specific wallet address
      * @param {string|null} label - display label
      */
-    addVariationalManual(manualData, label = null) {
+    addVariationalManual(manualData, walletAddress = null, label = null) {
         const entry = {
             id: 'variational_manual_' + Date.now(),
             exchange: 'variational',
-            walletAddress: null,
+            walletAddress: walletAddress || null,
             label: label || 'Variational',
             manualData: { ...manualData, inputDate: Date.now() }
         };
@@ -148,11 +149,13 @@ class WalletManager {
      * Update manual data for an existing Variational entry.
      * @param {string} id - entry id
      * @param {object} manualData - { initDeposit, actDeposit, volume, points, rank }
+     * @param {string|null} walletAddress - specific wallet address
      */
-    updateVariationalManual(id, manualData) {
+    updateVariationalManual(id, manualData, walletAddress = null) {
         const entry = this.state.activeExchanges.find(e => e.id === id);
         if (!entry || entry.exchange !== 'variational') return false;
         entry.manualData = { ...manualData, inputDate: Date.now() };
+        if (walletAddress !== null) entry.walletAddress = walletAddress;
         this._saveExchanges();
         return true;
     }

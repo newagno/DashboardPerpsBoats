@@ -199,6 +199,7 @@ class DashboardManager {
 
             // ── Variational manual path ────────────────────────────────────
             if (exc === 'variational') {
+                const walletAddress = document.getElementById('var-wallet-address').value.trim();
                 const manualData = {
                     initDeposit: parseFloat(document.getElementById('var-init-deposit').value) || 0,
                     actDeposit:  parseFloat(document.getElementById('var-act-deposit').value)  || 0,
@@ -208,8 +209,8 @@ class DashboardManager {
                     winRate:     parseFloat(document.getElementById('var-win-rate').value) || 0,
                     roi:         parseFloat(document.getElementById('var-roi').value) || 0
                 };
-                window.walletManager.addVariationalManual(manualData, label);
-                ['var-init-deposit','var-act-deposit','var-volume','var-points','var-rank','var-win-rate','var-roi'].forEach(fid => {
+                window.walletManager.addVariationalManual(manualData, walletAddress, label);
+                ['var-wallet-address','var-init-deposit','var-act-deposit','var-volume','var-points','var-rank','var-win-rate','var-roi'].forEach(fid => {
                     const el = document.getElementById(fid); if (el) el.value = '';
                 });
                 if (labelInput) labelInput.value = '';
@@ -580,6 +581,7 @@ class DashboardManager {
         if (!entry || entry.exchange !== 'variational') return;
         const md = entry.manualData || {};
         document.getElementById('edit-var-id').value           = id;
+        document.getElementById('edit-var-wallet-address').value = entry.walletAddress || '';
         document.getElementById('edit-var-init-deposit').value = md.initDeposit || '';
         document.getElementById('edit-var-act-deposit').value  = md.actDeposit  || '';
         document.getElementById('edit-var-volume').value       = md.volume      || '';
@@ -593,6 +595,7 @@ class DashboardManager {
     saveVariationalEdit() {
         const id = document.getElementById('edit-var-id').value;
         if (!id) return;
+        const walletAddress = document.getElementById('edit-var-wallet-address').value.trim();
         const manualData = {
             initDeposit: parseFloat(document.getElementById('edit-var-init-deposit').value) || 0,
             actDeposit:  parseFloat(document.getElementById('edit-var-act-deposit').value)  || 0,
@@ -602,7 +605,7 @@ class DashboardManager {
             winRate:     parseFloat(document.getElementById('edit-var-win-rate').value) || 0,
             roi:         parseFloat(document.getElementById('edit-var-roi').value) || 0
         };
-        window.walletManager.updateVariationalManual(id, manualData);
+        window.walletManager.updateVariationalManual(id, manualData, walletAddress);
         document.getElementById('modal-edit-variational').style.display = 'none';
         window.refreshEngine.refresh();
     }

@@ -137,6 +137,11 @@
                     <div id="variational-config-group" style="display: none; margin-bottom: 15px;">
                         <p style="font-size: 0.8em; color: var(--text-muted, #94a3b8); margin-bottom: 10px;" data-i18n="variational_desc">Enter trading statistics manually. PNL and $/POINT will be calculated automatically.</p>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <div style="grid-column: span 2;">
+                                <label data-i18n="wallet_address">Wallet Address</label>
+                                <input type="text" id="var-wallet-address" placeholder="0x..." autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                            </div>
                             <div>
                                 <label data-i18n="var_init_deposit">Initial Deposit ($)</label>
                                 <input type="number" id="var-init-deposit" placeholder="0.00" min="0" step="0.01" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
@@ -195,6 +200,10 @@
             <div class="modal-body" style="padding: 20px 0;">
                 <input type="hidden" id="edit-var-id">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div style="grid-column: span 2;">
+                        <label data-i18n="wallet_address">Wallet Address</label>
+                        <input type="text" id="edit-var-wallet-address" placeholder="0x..." style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                    </div>
                     <div>
                         <label data-i18n="var_init_deposit">Initial Deposit ($)</label>
                         <input type="number" id="edit-var-init-deposit" placeholder="0.00" min="0" step="0.01" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">

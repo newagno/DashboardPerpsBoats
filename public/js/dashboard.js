@@ -205,10 +205,11 @@ class DashboardManager {
                     volume:      parseFloat(document.getElementById('var-volume').value)        || 0,
                     points:      parseFloat(document.getElementById('var-points').value)        || 0,
                     rank:        document.getElementById('var-rank').value.trim() || null,
-                    winRate:     parseFloat(document.getElementById('var-win-rate').value) || 0
+                    winRate:     parseFloat(document.getElementById('var-win-rate').value) || 0,
+                    roi:         parseFloat(document.getElementById('var-roi').value) || 0
                 };
                 window.walletManager.addVariationalManual(manualData, label);
-                ['var-init-deposit','var-act-deposit','var-volume','var-points','var-rank','var-win-rate'].forEach(fid => {
+                ['var-init-deposit','var-act-deposit','var-volume','var-points','var-rank','var-win-rate','var-roi'].forEach(fid => {
                     const el = document.getElementById(fid); if (el) el.value = '';
                 });
                 if (labelInput) labelInput.value = '';
@@ -463,9 +464,11 @@ class DashboardManager {
         let logoUrl = '';
         if (exchange === 'nado')     logoUrl = 'assets/nado.png';
         else if (exchange === 'extended') logoUrl = 'assets/Extended.png';
+        else if (exchange === 'variational') logoUrl = 'assets/Variational.png';
 
         const logoHtml  = logoUrl ? `<img src="${logoUrl}" style="width: 18px; height: 18px; border-radius: 50%; vertical-align: middle; margin-right: 8px;">` : `<div style="width: 18px; height: 18px; margin-right: 8px;"></div>`;
         const labelHtml = label    ? `<span class="wallet-label" style="background: rgba(255,255,255,0.1); padding: 2px 6px; font-size: 0.8em; margin-left: 10px; border: 1px solid rgba(255,255,255,0.2);">${label}</span>` : '';
+        const addrHtml  = addrShort ? `<span class="wallet-address-truncated" style="margin-left: auto; margin-right: 15px;">ID: ${addrShort}</span>` : `<span style="margin-left: auto; margin-right: 15px;"></span>`;
 
         if (!success) {
             card.innerHTML = `
@@ -473,7 +476,7 @@ class DashboardManager {
                     ${logoHtml}
                     <span class="exchange-badge">${excName}</span>
                     ${labelHtml}
-                    <span class="wallet-address-truncated" style="margin-left: auto; margin-right: 15px;">ID: ${addrShort}</span>
+                    ${addrHtml}
                     <button class="remove-btn" onclick="window.dashboardMgr.removeWallet('${id}')">×</button>
                 </div>
                 <div class="card-body error-text" style="padding:20px; color:#ff6b6b;">
@@ -509,15 +512,23 @@ class DashboardManager {
 
         // Edit button (only for Variational)
         const editBtnHtml = (exchange === 'variational')
-            ? `<button class="btn-icon" title="${window.i18n ? window.i18n.t('var_edit_btn') : 'Edit data'}" onclick="window.dashboardMgr.openEditVariational('${id}')" style="padding: 4px; margin-left: 8px; display: flex; align-items: center; color: var(--text-muted);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>`
+            ? `<button class="btn-icon" title="${window.i18n ? window.i18n.t('var_edit_btn') : 'Edit data'}" onclick="window.dashboardMgr.openEditVariational('${id}')" style="background:transparent; border:none; padding:4px; margin-left:8px; display:flex; align-items:center; color:var(--text-muted); opacity:0.7; cursor:pointer;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>`
             : '';
+
+        let roi = 0;
+        if (exchange === 'variational' && data.roi !== undefined && data.roi !== null) {
+            roi = data.roi;
+        } else {
+            roi = data.initDeposit > 0 ? (data.pnl / data.initDeposit) * 100 : 0;
+        }
+        const roiClass = roi >= 0 ? 'positive' : 'negative';
 
         card.innerHTML = `
             <div class="card-header" style="display: flex; align-items: center; min-height: 38px;">
                 ${logoHtml}
                 <span class="exchange-badge">${excName}</span>
                 ${labelHtml}
-                <span class="wallet-address-truncated" style="margin-left: auto; margin-right: 15px;">ID: ${addrShort}</span>
+                ${addrHtml}
                 ${editBtnHtml}
                 <button class="remove-btn" onclick="window.dashboardMgr.removeWallet('${id}')">×</button>
             </div>
@@ -529,7 +540,8 @@ class DashboardManager {
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_rank') : '05 // RANK'}</span><span class="stat-value">${data.rank ? data.rank : 'N/A'}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_pnl') : '06 // PNL'}</span><span class="stat-value ${pnlClass}">${window.Utils.formatCurrency(data.pnl)}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_win_rate') : '07 // WIN_RATE'}</span><span class="stat-value">${window.Utils.formatPercent(data.winRate)}</span></div>
-                <div class="wallet-stat" style="border-top: 1px dashed rgba(255,72,54,0.3); margin-top:2px;"><span class="stat-label" style="color: rgba(255,72,54,0.7);">${window.i18n ? window.i18n.t('card_point_value') : '08 // $/POINT'}</span><span class="stat-value" style="color: rgba(255,72,54,0.9); font-size:12px;">${pointValue}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_roi') : '08 // ROI'}</span><span class="stat-value ${roiClass}">${window.Utils.formatPercent(roi)}</span></div>
+                <div class="wallet-stat" style="border-top: 1px dashed rgba(255,72,54,0.3); margin-top:2px;"><span class="stat-label" style="color: rgba(255,72,54,0.7);">${window.i18n ? window.i18n.t('card_point_value') : '09 // $/POINT'}</span><span class="stat-value" style="color: rgba(255,72,54,0.9); font-size:12px;">${pointValue}</span></div>
             </div>
             <div class="wallet-footer">
                 <span class="timestamp">${footerTimestamp}</span>
@@ -573,6 +585,7 @@ class DashboardManager {
         document.getElementById('edit-var-points').value       = md.points      || '';
         document.getElementById('edit-var-rank').value         = md.rank        || '';
         document.getElementById('edit-var-win-rate').value     = md.winRate     || '';
+        document.getElementById('edit-var-roi').value          = md.roi         || '';
         document.getElementById('modal-edit-variational').style.display = 'flex';
     }
 
@@ -585,7 +598,8 @@ class DashboardManager {
             volume:      parseFloat(document.getElementById('edit-var-volume').value)        || 0,
             points:      parseFloat(document.getElementById('edit-var-points').value)        || 0,
             rank:        document.getElementById('edit-var-rank').value.trim() || null,
-            winRate:     parseFloat(document.getElementById('edit-var-win-rate').value) || 0
+            winRate:     parseFloat(document.getElementById('edit-var-win-rate').value) || 0,
+            roi:         parseFloat(document.getElementById('edit-var-roi').value) || 0
         };
         window.walletManager.updateVariationalManual(id, manualData);
         document.getElementById('modal-edit-variational').style.display = 'none';
@@ -718,23 +732,19 @@ class DashboardManager {
         });
         const meanWinRate = winRateCount > 0 ? (totalWinRate / winRateCount) : 0;
 
-        // $/POINT for summary: same logic — if total PNL < 0, cost = |PNL|/pts; if >= 0, free/earning
-        let avgPointValue = 'N/A';
-        if (totalPoints > 0) {
-            if (totalPnL < 0) {
-                avgPointValue = `$${(Math.abs(totalPnL) / totalPoints).toFixed(4)}/pt`;
-            } else {
-                avgPointValue = `+$${(totalPnL / totalPoints).toFixed(4)}/pt`;
-            }
-        }
+        const totalROI = totalInit > 0 ? (totalPnL / totalInit) * 100 : 0;
 
         document.getElementById('total-deposit').textContent  = window.Utils.formatCurrency(totalInit);
         document.getElementById('total-pnl').textContent      = window.Utils.formatCurrency(totalPnL);
-        document.getElementById('total-volume').textContent   = window.Utils.formatCurrency(totalVol);
+        document.getElementById('total-roi').textContent      = window.Utils.formatPercent(totalROI);
         document.getElementById('total-win-rate').textContent = window.Utils.formatPercent(meanWinRate);
+        document.getElementById('total-volume').textContent   = window.Utils.formatCurrency(totalVol);
 
-        const ppEl = document.getElementById('total-point-value');
-        if (ppEl) ppEl.textContent = avgPointValue;
+        const roiEl = document.getElementById('total-roi');
+        if (roiEl) {
+            roiEl.textContent = window.Utils.formatPercent(totalROI);
+            roiEl.className = totalROI >= 0 ? 'value positive' : 'value negative';
+        }
     }
 }
 

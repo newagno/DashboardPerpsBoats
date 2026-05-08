@@ -20,7 +20,7 @@
         <!-- Sidebar or Header -->
         <header class="dash-header">
             <div class="logo">
-                <img src="assets/key.png" alt="Key" class="logo-key-icon" id="draggable-key" draggable="true">
+                <img src="assets/key.png" alt="Key" class="logo-key-icon" id="draggable-key" draggable="true" style="width: 40px; height: 40px; object-fit: contain; margin-right: 10px;">
                 <span class="logo-text" data-i18n="logo_text">Perpetual Trading Dashboard</span>
             </div>
             <div class="header-actions" style="display: flex; gap: 15px; align-items: center;">
@@ -61,16 +61,16 @@
                     <span id="total-pnl" class="value positive">$0.00</span>
                 </div>
                 <div class="summary-card">
-                    <span class="label" data-i18n="mean_win_rate">03 // MEAN_WIN_RATE</span>
+                    <span class="label" data-i18n="roi">03 // ROI</span>
+                    <span id="total-roi" class="value positive">0.00%</span>
+                </div>
+                <div class="summary-card">
+                    <span class="label" data-i18n="mean_win_rate">04 // WIN_RATE</span>
                     <span id="total-win-rate" class="value">0%</span>
                 </div>
                 <div class="summary-card">
-                    <span class="label" data-i18n="total_volume">04 // TOTAL_VOLUME</span>
+                    <span class="label" data-i18n="total_volume">05 // TOTAL_VOLUME</span>
                     <span id="total-volume" class="value">$0.00</span>
-                </div>
-                <div class="summary-card">
-                    <span class="label" data-i18n="point_value">05 // $/POINT</span>
-                    <span id="total-point-value" class="value" style="color: rgba(255,72,54,0.9);">N/A</span>
                 </div>
             </section>
 
@@ -161,6 +161,10 @@
                                 <label data-i18n="var_win_rate">Win Rate (%)</label>
                                 <input type="number" id="var-win-rate" placeholder="0.00" min="0" step="0.01" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
                             </div>
+                            <div>
+                                <label data-i18n="var_roi">ROI (%)</label>
+                                <input type="number" id="var-roi" placeholder="0.00" step="0.01" autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                            </div>
                         </div>
                     </div>
 
@@ -214,6 +218,10 @@
                     <div>
                         <label data-i18n="var_win_rate">Win Rate (%)</label>
                         <input type="number" id="edit-var-win-rate" placeholder="0.00" min="0" step="0.01" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                    </div>
+                    <div>
+                        <label data-i18n="var_roi">ROI (%)</label>
+                        <input type="number" id="edit-var-roi" placeholder="0.00" step="0.01" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
                     </div>
                 </div>
             </div>

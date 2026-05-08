@@ -186,9 +186,21 @@ body::after {
     border-bottom: 1px solid var(--border-color);
     background-color: #1a1a1a;
     display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.card-header-row1 {
+    display: flex;
     align-items: center;
-    min-height: 44px;
-    gap: 0;
+    gap: 6px;
+    min-height: 22px;
+}
+
+.card-header-row2 {
+    display: flex;
+    align-items: center;
+    min-height: 16px;
 }
 
 .exchange-badge {
@@ -197,26 +209,37 @@ body::after {
     padding: 2px 8px;
     font-size: 10px;
     font-weight: 700;
+    flex-shrink: 0;
 }
 
 .wallet-address-truncated {
-    font-size: 11px;
-    color: #aaa;
-    display: inline;
+    font-size: 10px;
+    color: #666;
+    font-family: var(--font-micro);
     white-space: nowrap;
-    margin-left: auto;
-    margin-right: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.card-label {
+    font-size: 10px;
+    color: #aaa;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    padding: 1px 6px;
+    flex-shrink: 0;
 }
 
 .remove-btn {
     background: none;
     border: none;
-    color: #666;
+    color: #555;
     font-size: 14px;
     cursor: pointer;
-    padding: 2px 4px;
+    padding: 0 2px;
     line-height: 1;
     flex-shrink: 0;
+    margin-left: auto;
 }
 
 .remove-btn:hover {

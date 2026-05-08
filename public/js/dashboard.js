@@ -466,19 +466,28 @@ class DashboardManager {
         else if (exchange === 'extended') logoUrl = 'assets/Extended.png';
         else if (exchange === 'variational') logoUrl = 'assets/Variational.png';
 
-        const logoHtml  = logoUrl ? `<img src="${logoUrl}" style="width: 18px; height: 18px; border-radius: 50%; vertical-align: middle; margin-right: 8px;">` : `<div style="width: 18px; height: 18px; margin-right: 8px;"></div>`;
-        const labelHtml = label    ? `<span class="wallet-label" style="background: rgba(255,255,255,0.1); padding: 2px 6px; font-size: 0.8em; margin-left: 10px; border: 1px solid rgba(255,255,255,0.2);">${label}</span>` : '';
-        const addrHtml  = addrShort ? `<span class="wallet-address-truncated" style="margin-left: auto; margin-right: 15px;">ID: ${addrShort}</span>` : `<span style="margin-left: auto; margin-right: 15px;"></span>`;
+        const logoHtml  = logoUrl
+            ? `<img src="${logoUrl}" style="width:16px;height:16px;object-fit:contain;flex-shrink:0;">`
+            : `<div style="width:16px;height:16px;flex-shrink:0;"></div>`;
+        const labelHtml = label ? `<span class="card-label">${label}</span>` : '';
+        const addrRow   = addrShort ? `<span class="wallet-address-truncated">ID: ${addrShort}</span>` : '';
 
-        if (!success) {
-            card.innerHTML = `
-                <div class="card-header">
+        const headerHtml = (editBtnArg = '') => `
+            <div class="card-header">
+                <div class="card-header-row1">
                     ${logoHtml}
                     <span class="exchange-badge">${excName}</span>
                     ${labelHtml}
-                    ${addrHtml}
+                    ${editBtnArg}
                     <button class="remove-btn" onclick="window.dashboardMgr.removeWallet('${id}')">×</button>
                 </div>
+                <div class="card-header-row2">
+                    ${addrRow}
+                </div>
+            </div>`;
+
+        if (!success) {
+            card.innerHTML = headerHtml() + `
                 <div class="card-body error-text" style="padding:20px; color:#ff6b6b;">
                     SYNC ERROR: ${error || (window.i18n ? window.i18n.t('failed_sync') : 'Connection Failed')}
                 </div>`;
@@ -512,7 +521,7 @@ class DashboardManager {
 
         // Edit button (only for Variational)
         const editBtnHtml = (exchange === 'variational')
-            ? `<button class="btn-icon" title="${window.i18n ? window.i18n.t('var_edit_btn') : 'Edit data'}" onclick="window.dashboardMgr.openEditVariational('${id}')" style="background:transparent; border:none; padding:4px; margin-left:8px; display:flex; align-items:center; color:var(--text-muted); opacity:0.7; cursor:pointer;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>`
+            ? `<button title="${window.i18n ? window.i18n.t('var_edit_btn') : 'Edit data'}" onclick="window.dashboardMgr.openEditVariational('${id}')" style="background:transparent;border:none;padding:2px;display:flex;align-items:center;color:#888;cursor:pointer;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#888'"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>`
             : '';
 
         let roi = 0;
@@ -523,15 +532,7 @@ class DashboardManager {
         }
         const roiClass = roi >= 0 ? 'positive' : 'negative';
 
-        card.innerHTML = `
-            <div class="card-header">
-                ${logoHtml}
-                <span class="exchange-badge">${excName}</span>
-                ${labelHtml}
-                ${addrHtml}
-                ${editBtnHtml}
-                <button class="remove-btn" onclick="window.dashboardMgr.removeWallet('${id}')">×</button>
-            </div>
+        card.innerHTML = headerHtml(editBtnHtml) + `
             <div class="wallet-stats-grid">
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_init_deposit') : '01 // INIT_DEPOSIT'}</span><span class="stat-value">${window.Utils.formatCurrency(data.initDeposit)}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_act_deposit') : '02 // ACT_DEPOSIT'}</span><span class="stat-value">${window.Utils.formatCurrency(data.actDeposit)}</span></div>

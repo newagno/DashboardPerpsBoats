@@ -182,12 +182,13 @@ body::after {
 }
 
 .card-header {
-    padding: 15px;
+    padding: 10px 15px;
     border-bottom: 1px solid var(--border-color);
     background-color: #1a1a1a;
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    min-height: 44px;
+    gap: 0;
 }
 
 .exchange-badge {
@@ -201,8 +202,25 @@ body::after {
 .wallet-address-truncated {
     font-size: 11px;
     color: #aaa;
-    margin-top: 4px;
-    display: block;
+    display: inline;
+    white-space: nowrap;
+    margin-left: auto;
+    margin-right: 10px;
+}
+
+.remove-btn {
+    background: none;
+    border: none;
+    color: #666;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px 4px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.remove-btn:hover {
+    color: var(--accent-red);
 }
 
 /* Metrics List - Rigid Vertical Order */
@@ -421,12 +439,18 @@ input:focus {
 }
 
 .spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid rgba(230, 25, 25, 0.1);
+    width: 32px;
+    height: 32px;
+    border: 3px solid rgba(255, 72, 54, 0.15);
     border-top: 3px solid var(--accent-red);
-    animation: spin 1s linear infinite;
+    border-radius: 0 !important;
+    animation: spin 0.8s linear infinite;
     margin-bottom: 15px;
+}
+
+@keyframes spin {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
 /* ASCII Decorations */

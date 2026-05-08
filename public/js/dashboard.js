@@ -472,7 +472,7 @@ class DashboardManager {
 
         if (!success) {
             card.innerHTML = `
-                <div class="card-header" style="display: flex; align-items: center; min-height: 38px;">
+                <div class="card-header">
                     ${logoHtml}
                     <span class="exchange-badge">${excName}</span>
                     ${labelHtml}
@@ -524,7 +524,7 @@ class DashboardManager {
         const roiClass = roi >= 0 ? 'positive' : 'negative';
 
         card.innerHTML = `
-            <div class="card-header" style="display: flex; align-items: center; min-height: 38px;">
+            <div class="card-header">
                 ${logoHtml}
                 <span class="exchange-badge">${excName}</span>
                 ${labelHtml}
@@ -642,6 +642,11 @@ class DashboardManager {
             d.points = 0;
         } else {
             d.points = parseFloat(d.points.toFixed(2));
+        }
+
+        // Pass through manual ROI if present (Variational)
+        if (rawData.roi !== undefined && rawData.roi !== null) {
+            d.roi = rawData.roi;
         }
 
         return d;

@@ -111,6 +111,7 @@ class RefreshEngine {
                         points:       md.points      || 0,
                         rank:         md.rank        || null,
                         win_rate:     md.winRate     || 0,
+                        roi:          (md.roi !== undefined && md.roi !== null) ? md.roi : null,
                         _inputDate:   md.inputDate   || null
                     };
                 } else {

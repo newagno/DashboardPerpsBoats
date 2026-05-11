@@ -123,33 +123,38 @@ app.get('/api/auth/check', async (req, res) => {
     res.json({ authenticated: true, address: session.address });
 });
 
-// ─── Secure Key Store (Vault in Redis/Store) ──────────────────────────────
-app.post('/api/exchanges/keys/store', csrfProtect, validate(schemas.storeKeySchema, 'body'), async (req, res) => {
+// ─── Secure Key Store (HttpOnly Cookies) ───────────────────────────────────
+// This approach is secure against XSS and works perfectly on Vercel without Redis.
+app.post('/api/exchanges/keys/store', csrfProtect, validate(schemas.storeKeySchema, 'body'), (req, res) => {
     const { type, entryId, value } = req.validatedBody;
-    const storeKey = `vault:${type}:${entryId}`;
+    const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
 
-    // Store key in Redis/Memory for 30 days
-    await store.set(storeKey, value, 30 * 24 * 60 * 60);
+    res.cookie(cookieName, value, {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: isProd ? 'strict' : 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        path: '/'
+    });
 
-    logger.info(`Vaulted ${type} key for entry ${entryId} in server-side store`);
+    logger.info(`Stored ${type} key for entry ${entryId} securely in cookie`);
     res.json({ success: true });
 });
 
-// ─── Check if a key exists in Vault ────────────────────────────────────────
-app.get('/api/exchanges/keys/check', async (req, res) => {
+// ─── Check if a key exists in Cookies ──────────────────────────────────────
+app.get('/api/exchanges/keys/check', (req, res) => {
     const { type, entryId } = req.query;
     if (!type || !entryId) return res.status(400).json({ error: 'Missing type or entryId' });
-    const storeKey = `vault:${type}:${entryId}`;
-    const keyExists = await store.exists(storeKey);
-    res.json({ exists: keyExists });
+    const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
+    res.json({ exists: !!req.cookies[cookieName] });
 });
 
-app.post('/api/exchanges/keys/remove', csrfProtect, async (req, res) => {
+app.post('/api/exchanges/keys/remove', csrfProtect, (req, res) => {
     const { type, entryId } = req.body;
     if (!type || !entryId) return res.status(400).json({ error: 'Missing type or entryId' });
-    const storeKey = `vault:${type}:${entryId}`;
-    await store.del(storeKey);
-    logger.info(`Removed ${type} key for entry ${entryId} from vault`);
+    const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
+    res.clearCookie(cookieName);
+    logger.info(`Removed ${type} key for entry ${entryId} from cookies`);
     res.json({ success: true });
 });
 
@@ -157,11 +162,11 @@ app.post('/api/exchanges/keys/remove', csrfProtect, async (req, res) => {
 app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, res) => {
     const errors = [];
     try {
-        // Look up API key from Vault using entryId
+        // Look up API key from HttpOnly Cookie using entryId
         const entryId = req.body.entryId;
         if (!entryId) return res.status(400).json({ error: 'entryId required' });
         
-        const apiKey = await store.get(`vault:extended:${entryId}`);
+        const apiKey = req.cookies[`ext_key_${entryId}`];
         if (!apiKey) return res.status(404).json({ error: 'API Key not found in vault. Please re-add this exchange.' });
 
         const headers = {

@@ -12,8 +12,14 @@ class WalletManager {
             address: null,
             chainId: null,
             activeExchanges: [], // Array of { id, exchange, walletAddress, label }
-            extendedApiKeys: {}, // Tab-only, never persisted, keyed by entry.id
+            extendedApiKeys: {}, // Tab-only, never persisted to localStorage
             variationalTokens: {} // Tab-only vr-tokens for Variational
+        };
+
+        // CSRF header for all backend POST requests
+        this._csrfHeaders = {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'TradeDash'
         };
 
         this.DOMAIN_BASE = {
@@ -91,19 +97,31 @@ class WalletManager {
     }
 
     setExtendedApiKey(id, key) { 
-        this.state.extendedApiKeys[id] = key; 
-        localStorage.setItem('extendedApiKey_' + id, key);
+        this.state.extendedApiKeys[id] = key;
+        // Store in HttpOnly cookie via backend
+        fetch('/api/exchanges/keys/store', {
+            method: 'POST',
+            headers: this._csrfHeaders,
+            credentials: 'include',
+            body: JSON.stringify({ type: 'extended', entryId: id, value: key })
+        }).catch(e => console.error('Failed to store Extended key:', e));
     }
     getExtendedApiKey(id) { 
-        return this.state.extendedApiKeys[id] || localStorage.getItem('extendedApiKey_' + id) || null; 
+        return this.state.extendedApiKeys[id] || null; 
     }
     
     setVariationalToken(id, token) { 
-        this.state.variationalTokens[id] = token; 
-        localStorage.setItem('variationalToken_' + id, token);
+        this.state.variationalTokens[id] = token;
+        // Store in HttpOnly cookie via backend
+        fetch('/api/exchanges/keys/store', {
+            method: 'POST',
+            headers: this._csrfHeaders,
+            credentials: 'include',
+            body: JSON.stringify({ type: 'variational', entryId: id, value: token })
+        }).catch(e => console.error('Failed to store Variational token:', e));
     }
     getVariationalToken(id) { 
-        return this.state.variationalTokens[id] || localStorage.getItem('variationalToken_' + id) || null; 
+        return this.state.variationalTokens[id] || null; 
     }
 
     /**
@@ -169,11 +187,23 @@ class WalletManager {
         this._saveExchanges();
         if (entry?.exchange === 'extended') {
             delete this.state.extendedApiKeys[id];
-            localStorage.removeItem('extendedApiKey_' + id);
+            // Remove HttpOnly cookie via backend
+            fetch('/api/exchanges/keys/remove', {
+                method: 'POST',
+                headers: this._csrfHeaders,
+                credentials: 'include',
+                body: JSON.stringify({ type: 'extended', entryId: id })
+            }).catch(() => {});
         }
         if (entry?.exchange === 'variational') {
             delete this.state.variationalTokens[id];
-            localStorage.removeItem('variationalToken_' + id);
+            // Remove HttpOnly cookie via backend
+            fetch('/api/exchanges/keys/remove', {
+                method: 'POST',
+                headers: this._csrfHeaders,
+                credentials: 'include',
+                body: JSON.stringify({ type: 'variational', entryId: id })
+            }).catch(() => {});
             // manualData is stored inside the entry object in activeExchanges — already removed above
         }
     }
@@ -238,7 +268,8 @@ class WalletManager {
 
             const verifyRes = await fetch('/api/auth/verify', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: this._csrfHeaders,
+                credentials: 'include',
                 body: JSON.stringify({ address: this.state.address, signature, message, chainId: this.state.chainId })
             });
 
@@ -251,7 +282,7 @@ class WalletManager {
     }
 
     async logoutBackend() {
-        try { await fetch('/api/auth/logout', { method: 'POST' }); } catch(e) {}
+        try { await fetch('/api/auth/logout', { method: 'POST', headers: this._csrfHeaders, credentials: 'include' }); } catch(e) {}
     }
 
     disconnect() {

@@ -1,6 +1,7 @@
 /**
  * Exchange API classes — each sends walletAddress in the request body
  * so the backend can route multi-wallet requests correctly.
+ * All requests include X-Requested-With header for CSRF protection.
  */
 class BaseExchange {
     constructor(exchangeName) {
@@ -10,6 +11,11 @@ class BaseExchange {
 
     async fetchData(url, options = {}) {
         try {
+            // Ensure CSRF header is always present
+            options.headers = options.headers || {};
+            options.headers['X-Requested-With'] = 'TradeDash';
+            options.credentials = 'include';
+
             const response = await fetch(url, options);
             if (!response.ok) {
                 const errData = await response.json().catch(() => ({}));
@@ -24,16 +30,17 @@ class BaseExchange {
 }
 
 class ExtendedExchange extends BaseExchange {
-    constructor(apiKey) {
+    constructor(apiKey, entryId) {
         super('Extended');
         this.apiKey = apiKey;
+        this.entryId = entryId;
     }
 
     async getStats() {
         return this.fetchData(`${this.PROXY_BASE}/extended/stats`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ apiKey: this.apiKey })
+            body: JSON.stringify({ apiKey: this.apiKey, entryId: this.entryId })
         });
     }
 }
@@ -66,7 +73,6 @@ class VariationalExchange extends BaseExchange {
         return this.fetchData(`${this.PROXY_BASE}/variational/stats`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
             body: JSON.stringify({
                 address: window.walletManager.state.address,
                 walletAddress: this.walletAddress  // specific wallet for multi-wallet support

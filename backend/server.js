@@ -4,35 +4,101 @@ const path = require('path');
 const axios = require('axios');
 require('dotenv').config();
 const cookieParser = require('cookie-parser');
-const authController = require('./controllers/auth');const app = express();
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const logger = require('./utils/logger');
+const store = require('./utils/store');
+const { validate, schemas } = require('./utils/validation');
+const authController = require('./controllers/auth');
+
+const app = express();
 const PORT = process.env.PORT || 3000;
+const isProd = process.env.NODE_ENV === 'production';
 
-// Axios instance with global timeout
-const http = axios.create({ timeout: 60000 });
+// ── Initialize Redis (async, non-blocking) ──────────────────────────────────
+store.initRedis().catch(err => logger.error('Redis init failed:', err));
 
-// Middleware
+// Axios instance with global timeout (reduced for Vercel)
+const http = axios.create({ timeout: isProd ? 9000 : 60000 });
+
+// ── Security Headers ────────────────────────────────────────────────────────
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://unpkg.com"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            fontSrc: ["'self'", "https://fonts.gstatic.com"],
+            imgSrc: ["'self'", "data:", "blob:"],
+            connectSrc: ["'self'", "https://*.walletconnect.com", "https://*.walletconnect.org",
+                          "wss://*.walletconnect.com", "wss://*.walletconnect.org",
+                          "https://rpc.walletconnect.com", "https://pulse.walletconnect.com",
+                          "https://api.web3modal.com", "https://api.web3modal.org"],
+            frameSrc: ["'self'", "https://verify.walletconnect.com", "https://verify.walletconnect.org",
+                       "https://secure.walletconnect.com", "https://secure.walletconnect.org"]
+        }
+    },
+    crossOriginEmbedderPolicy: false
+}));
+
+// ── CORS (environment-aware) ────────────────────────────────────────────────
 app.use(cors({
     origin: (origin, callback) => {
-        const allowedOrigins = [
-            'http://localhost:3000',
-            'http://127.0.0.1:3000',
-            'http://localhost:5000',
-            'http://127.0.0.1:5000',
-            'https://tradedash-local.com',
-            'https://dashboard-perps.vercel.app',
-            'https://dashboard-perps-aiunch7i4-newagnos-projects-d51e8127.vercel.app'
-        ];
+        const allowedOrigins = isProd
+            ? [
+                'https://dashboard-perps.vercel.app',
+                'https://dashboard-perps-aiunch7i4-newagnos-projects-d51e8127.vercel.app'
+              ]
+            : [
+                'http://localhost:3000', 'http://127.0.0.1:3000',
+                'http://localhost:5000', 'http://127.0.0.1:5000',
+                'https://tradedash-local.com',
+                'https://dashboard-perps.vercel.app',
+                'https://dashboard-perps-aiunch7i4-newagnos-projects-d51e8127.vercel.app'
+              ];
         if (!origin || allowedOrigins.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
+            logger.warn(`CORS blocked origin: ${origin}`);
             callback(new Error('Not allowed by CORS'));
         }
     },
     credentials: true
 }));
+
 app.use(express.json());
 app.use(cookieParser());
 
+// ── Rate Limiting ───────────────────────────────────────────────────────────
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 30,                   // 30 requests per window
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many authentication attempts. Try again later.' }
+});
+
+const apiLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000,  // 1 minute
+    max: 60,                   // 60 requests per minute
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Slow down.' }
+});
+
+// ── CSRF Protection (custom header check for API routes) ────────────────────
+const csrfProtect = (req, res, next) => {
+    // Only enforce on state-changing methods
+    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+        const xRequestedWith = req.headers['x-requested-with'];
+        if (xRequestedWith !== 'TradeDash') {
+            return res.status(403).json({ error: 'CSRF validation failed' });
+        }
+    }
+    next();
+};
+
+// ── Static routes ───────────────────────────────────────────────────────────
 app.get('/', (req, res) => { res.redirect('/dashboard'); });
 app.get('/dashboard', (req, res) => {
     res.sendFile(path.join(__dirname, '../public/dashboard.html'));
@@ -40,14 +106,44 @@ app.get('/dashboard', (req, res) => {
 app.use(express.static(path.join(__dirname, '../public')));
 
 // ─── Auth Routes ───────────────────────────────────────────────
-app.get('/api/auth/nonce', authController.getNonce);
-app.post('/api/auth/verify', authController.verifySig);
-app.post('/api/auth/logout', authController.logout);
+app.get('/api/auth/nonce', authLimiter, validate(schemas.nonceQuerySchema, 'query'), authController.getNonce);
+app.post('/api/auth/verify', authLimiter, csrfProtect, validate(schemas.verifyBodySchema, 'body'), authController.verifySig);
+app.post('/api/auth/logout', csrfProtect, authController.logout);
+
+// ─── Secure Key Store (HttpOnly cookies for API keys) ──────────────────────
+app.post('/api/exchanges/keys/store', csrfProtect, validate(schemas.storeKeySchema, 'body'), (req, res) => {
+    const { type, entryId, value } = req.validatedBody;
+    const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
+
+    res.cookie(cookieName, value, {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: isProd ? 'strict' : 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        path: '/'
+    });
+
+    logger.info(`Stored ${type} key for entry ${entryId} in HttpOnly cookie`);
+    res.json({ success: true });
+});
+
+app.post('/api/exchanges/keys/remove', csrfProtect, (req, res) => {
+    const { type, entryId } = req.body;
+    if (!type || !entryId) return res.status(400).json({ error: 'Missing type or entryId' });
+    const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
+    res.clearCookie(cookieName);
+    logger.info(`Removed ${type} key for entry ${entryId}`);
+    res.json({ success: true });
+});
 
 // ─── Proxy - Extended Exchange (Starknet) ────────────────────────────────────
-app.post('/api/exchanges/extended/stats', async (req, res) => {
+app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, res) => {
+    const errors = [];
     try {
-        const { apiKey } = req.body;
+        // Read API key from HttpOnly cookie first, fall back to body for migration
+        const entryId = req.body.entryId;
+        const cookieKey = entryId ? req.cookies[`ext_key_${entryId}`] : null;
+        const apiKey = cookieKey || req.body.apiKey;
         if (!apiKey) return res.status(400).json({ error: 'API Key required' });
 
         const headers = {
@@ -58,13 +154,18 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
 
         const BASE = 'https://api.starknet.extended.exchange/api/v1';
 
-        // Paginated fetch helper - optimized for Serverless (limit iterations to avoid timeout)
+        // Paginated fetch helper - optimized for Serverless (time-budgeted)
+        const fetchStartTime = Date.now();
         const fetchAllPaginated = async (endpoint) => {
             let all = [];
             const seen = new Set();
             let cursor = null;
-            // Reduced from 2000 to 100 for Vercel compatibility
+            const maxTime = isProd ? 7000 : 55000;
             for (let i = 0; i < 100; i++) {
+                if (Date.now() - fetchStartTime > maxTime) {
+                    errors.push(`${endpoint}: time budget exceeded after ${all.length} records`);
+                    break;
+                }
                 try {
                     let url = `${BASE}${endpoint}${endpoint.includes('?') ? '&' : '?'}limit=10000`;
                     if (cursor) url += `&cursor=${cursor}`;
@@ -78,7 +179,7 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
                     const next = r.data?.pagination?.cursor;
                     if (added === 0 || !next) break;
                     cursor = next;
-                } catch (e) { console.error(`Extended pagination error [${endpoint}]:`, e.message); break; }
+                } catch (e) { errors.push(`${endpoint}: ${e.message}`); logger.error(`Extended pagination error [${endpoint}]:`, e.message); break; }
             }
             return all;
         };
@@ -86,20 +187,20 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
         // Fetch all endpoints in parallel
         const [balanceRes, tradesRes, pointsRes, opsRes, leaderboardRes, positionsRes, ordersHistRes] = await Promise.all([
             http.get(`${BASE}/user/balance`, { headers })
-                .catch(e => { console.error('Extended balance error:', e.message); return { data: {} }; }),
+                .catch(e => { errors.push(`balance: ${e.message}`); logger.error('Extended balance error:', e.message); return { data: {} }; }),
             fetchAllPaginated('/user/trades')
-                .catch(e => { console.error('Extended trades error:', e.message); return []; }),
+                .catch(e => { errors.push(`trades: ${e.message}`); logger.error('Extended trades error:', e.message); return []; }),
             http.get(`${BASE}/user/rewards/earned`, { headers })
-                .catch(e => { console.error('Extended points error:', e.message); return { data: { data: [] } }; }),
+                .catch(e => { errors.push(`points: ${e.message}`); logger.error('Extended points error:', e.message); return { data: { data: [] } }; }),
             fetchAllPaginated('/user/assetOperations')
-                .catch(e => { console.error('Extended ops error:', e.message); return []; }),
+                .catch(e => { errors.push(`ops: ${e.message}`); logger.error('Extended ops error:', e.message); return []; }),
             http.get(`${BASE}/user/rewards/leaderboard/stats`, { headers })
-                .catch(e => { console.error('Extended leaderboard error:', e.message); return { data: { data: {} } }; }),
+                .catch(e => { errors.push(`leaderboard: ${e.message}`); logger.error('Extended leaderboard error:', e.message); return { data: { data: {} } }; }),
             fetchAllPaginated('/user/positions/history')
-                .catch(e => { console.error('Extended positions error:', e.message); return []; }),
+                .catch(e => { errors.push(`positions: ${e.message}`); logger.error('Extended positions error:', e.message); return []; }),
             // Also fetch filled orders history — trades endpoint may miss some fills
             fetchAllPaginated('/user/orders/history')
-                .catch(e => { console.error('Extended orders hist error:', e.message); return []; })
+                .catch(e => { errors.push(`orders: ${e.message}`); logger.error('Extended orders hist error:', e.message); return []; })
         ]);
 
         // INIT_DEPOSIT = sum(DEPOSIT amounts) - sum(WITHDRAWAL amounts)
@@ -160,7 +261,7 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
         // PNL = ACT_DEPOSIT - INIT_DEPOSIT
         const pnl = actDeposit - initDeposit;
 
-        console.log(`[Extended] Trades: ${tradesRes.length}, Volume(trades): $${(volumeFromTrades || 0).toFixed(2)}, Orders: ${ordersHistRes.length}, Volume(orders): $${(volumeFromOrders || 0).toFixed(2)}, Final: $${(finalVolume || 0).toFixed(2)}`);
+        logger.info(`[Extended] Trades: ${tradesRes.length}, Volume(trades): $${(volumeFromTrades || 0).toFixed(2)}, Orders: ${ordersHistRes.length}, Volume(orders): $${(volumeFromOrders || 0).toFixed(2)}, Final: $${(finalVolume || 0).toFixed(2)}`);
 
         // RANK from leaderboard stats
         const lbData = leaderboardRes.data?.data || {};
@@ -174,17 +275,19 @@ app.post('/api/exchanges/extended/stats', async (req, res) => {
             win_rate: winRate,
             // Send full points API response so frontend can sum epochRewards across seasons
             points: pointsRes.data || {},
-            rank: rank
+            rank: rank,
+            partial_success: errors.length > 0 ? true : undefined,
+            warnings: errors.length > 0 ? errors : undefined
         });
     } catch (error) {
-        console.error('Extended Proxy Error:', error.message);
+        logger.error('Extended Proxy Error:', error.message);
         res.status(error.response?.status || 500).json({ error: error.message });
     }
 });
 
 
 // ─── Proxy - Nado Exchange (Ink L2) ─────────────────────────────────────────
-app.post('/api/exchanges/nado/stats', async (req, res) => {
+app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) => {
     try {
         // walletAddress allows multi-wallet: each Nado card provides its own address
         const { address, walletAddress } = req.body;
@@ -280,7 +383,7 @@ app.post('/api/exchanges/nado/stats', async (req, res) => {
         const finalVolume = totalVolumeFromSnap;
         const finalPnl    = pnlFromTrades;
 
-        console.log('[Nado] SnapVol: $' + totalVolumeFromSnap.toFixed(2) + ', Orders: ' + allOrders.length + ', InitDep(events,' + evts.length + '): $' + initDepositFromEvents.toFixed(2) + ', InitDep(snap): $' + initDepositFromSnap.toFixed(2) + ', Used: $' + initDeposit.toFixed(2));
+        logger.info('[Nado] SnapVol: $' + totalVolumeFromSnap.toFixed(2) + ', Orders: ' + allOrders.length + ', InitDep(events,' + evts.length + '): $' + initDepositFromEvents.toFixed(2) + ', InitDep(snap): $' + initDepositFromSnap.toFixed(2) + ', Used: $' + initDeposit.toFixed(2));
 
         res.json({
             snapshot: { assets: totalEquity },
@@ -295,14 +398,14 @@ app.post('/api/exchanges/nado/stats', async (req, res) => {
             wallet: targetAddress
         });
     } catch (error) {
-        console.error('Nado Proxy Error:', error.message);
+        logger.error('Nado Proxy Error:', error.message);
         res.status(error.response?.status || 500).json({ error: error.message });
     }
 });
 
 
 // ─── Proxy - Variational Exchange (Arbitrum) ─────────────────────────────────
-app.post('/api/exchanges/variational/stats', async (req, res) => {
+app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, async (req, res) => {
     try {
         // walletAddress allows multi-wallet support
         const { address, walletAddress } = req.body;
@@ -321,7 +424,7 @@ app.post('/api/exchanges/variational/stats', async (req, res) => {
         // Always fetch public platform stats
         const [statsRes, dropRes] = await Promise.all([
             http.get(`${OMNI_PUB}/metadata/stats`)
-                .catch(e => { console.error('Variational stats error:', e.message); return { data: {} }; }),
+                .catch(e => { logger.error('Variational stats error:', e.message); return { data: {} }; }),
             http.get(`${OMNI_API}/points/next_drop_ts`)
                 .catch(e => { return { data: { next_drop_ts: null } }; })
         ]);
@@ -334,22 +437,22 @@ app.post('/api/exchanges/variational/stats', async (req, res) => {
         };
 
         if (vrToken) {
-            console.log(`[Variational] Fetching user data for ${targetAddress}`);
+            logger.info(`[Variational] Fetching user data for ${logger.maskAddress(targetAddress)}`);
             const [portfolioRes, pointsRes, tradesRes, referralsRes] = await Promise.all([
                 // ACT_DEPOSIT: /portfolio/summary → sum_balance (Total Equity)
                 http.get(`${OMNI_API}/portfolio/summary`, { headers: authHeaders })
-                    .catch(e => { console.error('Variational portfolio:', e.message); return null; }),
+                    .catch(e => { logger.error('Variational portfolio:', e.message); return null; }),
                 // POINTS + RANK: /points/summary → total_points, rank
                 http.get(`${OMNI_API}/points/summary`, { headers: authHeaders })
-                    .catch(e => { console.error('Variational points:', e.message); return null; }),
+                    .catch(e => { logger.error('Variational points:', e.message); return null; }),
                 // INIT_DEPOSIT: /portfolio/trades filtered by DEPOSIT/WITHDRAWAL type
                 // NOTE: No dedicated transfers endpoint documented. Using portfolio/trades with type filter.
                 // Falls back to sum_balance - sum_upnl if trades endpoint fails.
                 http.get(`${OMNI_API}/portfolio/trades`, { headers: authHeaders, params: { limit: 1000, order_by: 'created_at', order: 'desc' } })
-                    .catch(e => { console.error('Variational trades:', e.message); return null; }),
+                    .catch(e => { logger.error('Variational trades:', e.message); return null; }),
                 // VOLUME: /referrals/summary → trade_volume.current (user's all-time trade volume)
                 http.get(`${OMNI_API}/referrals/summary`, { headers: authHeaders })
-                    .catch(e => { console.error('Variational referrals:', e.message); return null; })
+                    .catch(e => { logger.error('Variational referrals:', e.message); return null; })
             ]);
 
             if (portfolioRes?.data) {
@@ -401,7 +504,7 @@ app.post('/api/exchanges/variational/stats', async (req, res) => {
                 // No win/loss per position data in /portfolio/trades docs
                 responseData.portfolio.win_rate = 0; // DATA NOT FOUND in API docs
             } else {
-                console.warn('[Variational] Portfolio fetch failed - session cookie may be expired');
+                logger.warn('[Variational] Portfolio fetch failed - session cookie may be expired');
             }
 
             if (pointsRes?.data) {
@@ -410,15 +513,15 @@ app.post('/api/exchanges/variational/stats', async (req, res) => {
                     total_points: parseFloat(pointsRes.data.total_points || 0),
                     rank: pointsRes.data.rank || null
                 };
-                console.log('[Variational] Points:', JSON.stringify(responseData.points));
+                logger.info('[Variational] Points:', JSON.stringify(responseData.points));
             }
         } else {
-            console.warn('[Variational] No vr-token cookie - returning platform stats only');
+            logger.warn('[Variational] No vr-token cookie - returning platform stats only');
         }
 
         res.json(responseData);
     } catch (error) {
-        console.error('Variational Proxy Error:', error.message);
+        logger.error('Variational Proxy Error:', error.message);
         res.status(error.response?.status || 500).json({ error: error.message });
     }
 });
@@ -427,8 +530,8 @@ app.post('/api/exchanges/variational/stats', async (req, res) => {
 // Start Server (only listen if not running as a Vercel serverless function)
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     app.listen(PORT, () => {
-        console.log(`\n🚀 TradeDash Server running at http://localhost:${PORT}`);
-        console.log(`Serving frontend from: ${path.join(__dirname, '../frontend')}`);
+        logger.info(`🚀 TradeDash Server running at http://localhost:${PORT}`);
+        logger.info(`Serving frontend from: ${path.join(__dirname, '../public')}`);
     });
 }
 

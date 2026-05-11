@@ -90,7 +90,7 @@ class RefreshEngine {
                         window.walletManager.removeExchange(id);
                         return null;
                     }
-                    const obj = new window.Exchanges.Extended(extendedKey);
+                    const obj = new window.Exchanges.Extended(extendedKey, id);
                     data = await obj.getStats();
                 } else if (exchange === 'nado') {
                     // Pass walletAddress as 'walletAddress' so server uses that specific address

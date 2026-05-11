@@ -113,12 +113,19 @@ class DashboardManager {
     async init() {
         this.setupEasterEgg();
         this.setupEventListeners();
-        this.checkAuthState();
+        
+        const hasExchanges = window.walletManager.state.activeExchanges.length > 0;
+        if (hasExchanges) {
+            this.renderLoading();
+            setTimeout(() => window.refreshEngine.refresh(), 300);
+        } else {
+            this.walletsContainer.innerHTML = `<div class="empty-state"><p>${window.i18n ? window.i18n.t('no_exchange_configured') : 'NO ACTIVE EXCHANGE CONFIGURED. CLICK "ADD_EXCHANGE" TO INITIALIZE.'}</p></div>`;
+        }
 
         window.addEventListener('languageChanged', () => {
             // Re-render empty state or refresh existing cards with new language
             if (window.walletManager.state.activeExchanges.length === 0) {
-                this.checkAuthState();
+                this.walletsContainer.innerHTML = `<div class="empty-state"><p>${window.i18n ? window.i18n.t('no_exchange_configured') : 'NO ACTIVE EXCHANGE CONFIGURED. CLICK "ADD_EXCHANGE" TO INITIALIZE.'}</p></div>`;
             } else {
                 const remaining = window.walletManager.state.activeExchanges.map(e => ({...e, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...'}));
                 this.updateAllWalletCards(remaining);
@@ -127,15 +134,7 @@ class DashboardManager {
         });
     }
 
-    checkAuthState() {
-        const hasExchanges = window.walletManager.state.activeExchanges.length > 0;
-        if (hasExchanges) {
-            this.renderLoading();
-            setTimeout(() => window.refreshEngine.refresh(), 500);
-        } else {
-            this.walletsContainer.innerHTML = `<div class="empty-state"><p>${window.i18n ? window.i18n.t('no_exchange_configured') : 'NO ACTIVE SESSION OR EXCHANGES. CLICK "ADD_EXCHANGE" TO INITIALIZE.'}</p></div>`;
-        }
-    }
+
 
     setupEventListeners() {
         this.btnAddExchange.addEventListener('click', () => {
@@ -185,7 +184,7 @@ class DashboardManager {
         if (addrInputEl && validMsg) {
             addrInputEl.addEventListener('input', () => {
                 const v = addrInputEl.value.trim();
-                const valid = /^0x[0-9a-fA-F]{40}$/.test(v) || v.length === 0;
+                const valid = /^0x[0-9a-fA-F]{40,64}$/.test(v) || v.length === 0;
                 addrInputEl.classList.toggle('input-error', !valid && v.length > 0);
                 validMsg.classList.toggle('show', !valid && v.length > 0);
             });
@@ -227,7 +226,8 @@ class DashboardManager {
             const walletAddr = addrInput?.value.trim();
 
             // ── Validate address ───────────────────────────────────────────
-            if (walletAddr && !/^0x[0-9a-fA-F]{40}$/.test(walletAddr)) {
+            // Support both Ethereum (40 hex chars) and Starknet (up to 64 hex chars)
+            if (walletAddr && !/^0x[0-9a-fA-F]{40,64}$/.test(walletAddr)) {
                 addrInput.classList.add('input-error');
                 const vm = document.getElementById('wallet-addr-validation');
                 if (vm) vm.classList.add('show');
@@ -264,7 +264,8 @@ class DashboardManager {
             if (exc === 'extended') {
                 const pkInput = document.getElementById('extended-api-key');
                 const pk = pkInput.value.trim();
-                window.walletManager.setExtendedApiKey(result.id, pk);
+                // Await storage to ensure key is in vault before refreshEngine calls it
+                await window.walletManager.setExtendedApiKey(result.id, pk);
                 pkInput.value = '';
             }
 
@@ -283,6 +284,11 @@ class DashboardManager {
 
             this.modalAddExchange.style.display = 'none';
             if (walletAddr) this.saveWalletAddressHistory(walletAddr);
+            
+            // Re-render UI to include the new card (in loading state)
+            const remaining = window.walletManager.state.activeExchanges.map(e => ({...e, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...'}));
+            this.updateAllWalletCards(remaining);
+            
             window.refreshEngine.refresh();
         });
 
@@ -303,14 +309,12 @@ class DashboardManager {
 
     // ── Address history datalist ───────────────────────────────────────────
     saveWalletAddressHistory(address) {
-        const normalized = address.toLowerCase();
-        let history = [];
-        try { history = JSON.parse(localStorage.getItem('wallet_history') || '[]'); } catch(e) {}
-        const alreadyExists = history.some(h => h.toLowerCase() === normalized);
-        if (!alreadyExists) {
+        if (!address || !/^0x[0-9a-fA-F]{40,64}$/i.test(address)) return;
+        let history = JSON.parse(localStorage.getItem('walletAddressHistory') || '[]');
+        if (!history.includes(address)) {
             history.unshift(address);
-            if (history.length > 10) history.pop();
-            localStorage.setItem('wallet_history', JSON.stringify(history));
+            if (history.length > 5) history = history.slice(0, 5);
+            localStorage.setItem('walletAddressHistory', JSON.stringify(history));
             this.populateWalletHistory();
         }
     }
@@ -454,15 +458,30 @@ class DashboardManager {
         this.updateSummary();
     }
 
+    /**
+     * Escape HTML to prevent injection via user-supplied labels or error messages.
+     */
+    escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     createExchangeCard(res) {
         const { id, exchange, walletAddress, label, success, error } = res;
         const card = document.createElement('div');
         card.className = 'wallet-card';
         card.dataset.id = id;
-        const excName   = exchange.charAt(0).toUpperCase() + exchange.slice(1);
+        const excName   = this.escapeHtml(exchange.charAt(0).toUpperCase() + exchange.slice(1));
         let displayAddr = walletAddress || '';
+        // Detect manual Variational entry by presence of manualData in the source entry
+        const sourceEntry = window.walletManager.state.activeExchanges.find(e => e.id === id);
         if (!displayAddr && exchange === 'variational') {
-            displayAddr = id.includes('manual') ? 'MANUAL' : '';
+            displayAddr = sourceEntry?.manualData ? 'MANUAL' : '';
         }
         const addrShort = window.Utils.truncateAddress(displayAddr);
 
@@ -474,7 +493,9 @@ class DashboardManager {
         const logoHtml  = logoUrl
             ? `<img src="${logoUrl}" style="width:16px;height:16px;object-fit:contain;flex-shrink:0;">`
             : `<div style="width:16px;height:16px;flex-shrink:0;"></div>`;
-        const labelHtml = label ? `<span class="card-label">${label}</span>` : '';
+        // Sanitize label to prevent HTML injection
+        const safeLabel = this.escapeHtml(label);
+        const labelHtml = safeLabel ? `<span class="card-label">${safeLabel}</span>` : '';
         const addrRow   = addrShort ? `<span class="wallet-address-truncated">ID: ${addrShort}</span>` : '';
 
         const headerHtml = (editBtnArg = '') => `
@@ -494,7 +515,7 @@ class DashboardManager {
         if (!success) {
             card.innerHTML = headerHtml() + `
                 <div class="card-body error-text" style="padding:20px; color:#ff6b6b;">
-                    SYNC ERROR: ${error || (window.i18n ? window.i18n.t('failed_sync') : 'Connection Failed')}
+                    SYNC ERROR: ${this.escapeHtml(error || (window.i18n ? window.i18n.t('failed_sync') : 'Connection Failed'))}
                 </div>`;
             return card;
         }
@@ -556,21 +577,6 @@ class DashboardManager {
     }
 
     removeWallet(id) {
-        const entryToRemove = window.walletManager.state.activeExchanges.find(e => e.id === id);
-        if (entryToRemove) {
-            const eAddr = (entryToRemove.walletAddress || '').toLowerCase();
-            const duplicates = window.walletManager.state.activeExchanges.filter(e => 
-                e.exchange === entryToRemove.exchange && 
-                (e.walletAddress || '').toLowerCase() === eAddr &&
-                e.id !== id
-            );
-            duplicates.forEach(dup => {
-                console.log('Purging ghost duplicate:', dup.id);
-                window.walletManager.removeExchange(dup.id);
-                delete this.walletData[dup.id];
-            });
-        }
-
         window.walletManager.removeExchange(id);
         delete this.walletData[id];
         // Re-render only current active exchanges — do NOT show removed ones

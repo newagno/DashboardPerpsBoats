@@ -31,14 +31,6 @@
                 <div class="chest-container" id="treasure-chest">
                     <img src="assets/chest_premium.png" alt="VAULT" class="chest-icon" id="chest-img" loading="lazy" fetchpriority="high">
                 </div>
-                
-                <div id="wallet-auth-container" style="display: flex; gap: 10px;">
-                    <button id="btn-login-metamask" class="btn-primary" style="display: flex; align-items: center; gap: 8px; display: none;">
-                        <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" alt="MetaMask" style="width: 16px; height: 16px;">
-                        Connect & Authenticate
-                    </button>
-                    <button id="btn-disconnect" class="btn-secondary" style="display: none;">Disconnect</button>
-                </div>
 
                 <button id="btn-add-exchange" class="btn-icon-text" data-i18n="btn_add_exchange">
                     [ + ] ADD_EXCHANGE
@@ -121,7 +113,7 @@
                         <label for="wallet-address-input" data-i18n="wallet_address">Wallet Address</label>
                         <input type="text" id="wallet-address-input" list="wallet-address-history" data-i18n="wallet_placeholder" placeholder="0x..." autocomplete="off" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
                         <datalist id="wallet-address-history"></datalist>
-                        <div id="wallet-addr-validation" class="validation-msg" data-i18n="err_invalid_address">⚠ Invalid address — must be 42 chars starting with 0x</div>
+                        <div id="wallet-addr-validation" class="validation-msg" data-i18n="err_invalid_address">⚠ Invalid address — must be 42-66 chars starting with 0x</div>
                     </div>
 
                     <!-- 2. Extended API Key (only for Extended) -->

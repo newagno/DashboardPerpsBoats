@@ -110,29 +110,46 @@ app.get('/api/auth/nonce', authLimiter, validate(schemas.nonceQuerySchema, 'quer
 app.post('/api/auth/verify', authLimiter, csrfProtect, validate(schemas.verifyBodySchema, 'body'), authController.verifySig);
 app.post('/api/auth/logout', csrfProtect, authController.logout);
 
-// ─── Secure Key Store (HttpOnly cookies for API keys) ──────────────────────
-app.post('/api/exchanges/keys/store', csrfProtect, validate(schemas.storeKeySchema, 'body'), (req, res) => {
+// ─── Auth Check (lightweight session ping) ─────────────────────────────────
+// Used by frontend on page load. Returns session info without requiring headers.
+app.get('/api/auth/check', async (req, res) => {
+    const sessionId = req.cookies?.tradedash_auth;
+    if (!sessionId) return res.json({ authenticated: false, address: null });
+    const session = await require('./utils/store').get('session:' + sessionId);
+    if (!session) {
+        res.clearCookie('tradedash_auth');
+        return res.json({ authenticated: false, address: null });
+    }
+    res.json({ authenticated: true, address: session.address });
+});
+
+// ─── Secure Key Store (Vault in Redis/Store) ──────────────────────────────
+app.post('/api/exchanges/keys/store', csrfProtect, validate(schemas.storeKeySchema, 'body'), async (req, res) => {
     const { type, entryId, value } = req.validatedBody;
-    const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
+    const storeKey = `vault:${type}:${entryId}`;
 
-    res.cookie(cookieName, value, {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: isProd ? 'strict' : 'lax',
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-        path: '/'
-    });
+    // Store key in Redis/Memory for 30 days
+    await store.set(storeKey, value, 30 * 24 * 60 * 60);
 
-    logger.info(`Stored ${type} key for entry ${entryId} in HttpOnly cookie`);
+    logger.info(`Vaulted ${type} key for entry ${entryId} in server-side store`);
     res.json({ success: true });
 });
 
-app.post('/api/exchanges/keys/remove', csrfProtect, (req, res) => {
+// ─── Check if a key exists in Vault ────────────────────────────────────────
+app.get('/api/exchanges/keys/check', async (req, res) => {
+    const { type, entryId } = req.query;
+    if (!type || !entryId) return res.status(400).json({ error: 'Missing type or entryId' });
+    const storeKey = `vault:${type}:${entryId}`;
+    const keyExists = await store.exists(storeKey);
+    res.json({ exists: keyExists });
+});
+
+app.post('/api/exchanges/keys/remove', csrfProtect, async (req, res) => {
     const { type, entryId } = req.body;
     if (!type || !entryId) return res.status(400).json({ error: 'Missing type or entryId' });
-    const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
-    res.clearCookie(cookieName);
-    logger.info(`Removed ${type} key for entry ${entryId}`);
+    const storeKey = `vault:${type}:${entryId}`;
+    await store.del(storeKey);
+    logger.info(`Removed ${type} key for entry ${entryId} from vault`);
     res.json({ success: true });
 });
 
@@ -140,11 +157,12 @@ app.post('/api/exchanges/keys/remove', csrfProtect, (req, res) => {
 app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, res) => {
     const errors = [];
     try {
-        // Read API key from HttpOnly cookie first, fall back to body for migration
+        // Look up API key from Vault using entryId
         const entryId = req.body.entryId;
-        const cookieKey = entryId ? req.cookies[`ext_key_${entryId}`] : null;
-        const apiKey = cookieKey || req.body.apiKey;
-        if (!apiKey) return res.status(400).json({ error: 'API Key required' });
+        if (!entryId) return res.status(400).json({ error: 'entryId required' });
+        
+        const apiKey = await store.get(`vault:extended:${entryId}`);
+        if (!apiKey) return res.status(404).json({ error: 'API Key not found in vault. Please re-add this exchange.' });
 
         const headers = {
             'X-Api-Key': apiKey,
@@ -281,7 +299,7 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
         });
     } catch (error) {
         logger.error('Extended Proxy Error:', error.message);
-        res.status(error.response?.status || 500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to fetch Extended exchange data. Please try again.' });
     }
 });
 
@@ -399,7 +417,7 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
         });
     } catch (error) {
         logger.error('Nado Proxy Error:', error.message);
-        res.status(error.response?.status || 500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to fetch Nado exchange data. Please try again.' });
     }
 });
 
@@ -522,7 +540,7 @@ app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, async (req
         res.json(responseData);
     } catch (error) {
         logger.error('Variational Proxy Error:', error.message);
-        res.status(error.response?.status || 500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to fetch Variational exchange data. Please try again.' });
     }
 });
 

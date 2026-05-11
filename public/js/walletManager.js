@@ -11,9 +11,8 @@ class WalletManager {
         this.state = {
             address: null,
             chainId: null,
-            activeExchanges: [], // Array of { id, exchange, walletAddress, label }
-            extendedApiKeys: {}, // Tab-only, never persisted to localStorage
-            variationalTokens: {} // Tab-only vr-tokens for Variational
+            activeExchanges: [] // Array of { id, exchange, walletAddress, label }
+            // Note: API keys are NEVER stored here. They live only in HttpOnly cookies on the server.
         };
 
         // CSRF header for all backend POST requests
@@ -97,31 +96,41 @@ class WalletManager {
     }
 
     setExtendedApiKey(id, key) { 
-        this.state.extendedApiKeys[id] = key;
-        // Store in HttpOnly cookie via backend
-        fetch('/api/exchanges/keys/store', {
+        // Store in HttpOnly cookie via backend. Key is NOT kept in memory.
+        return fetch('/api/exchanges/keys/store', {
             method: 'POST',
             headers: this._csrfHeaders,
             credentials: 'include',
             body: JSON.stringify({ type: 'extended', entryId: id, value: key })
-        }).catch(e => console.error('Failed to store Extended key:', e));
+        }).then(r => r.json()).catch(e => { console.error('Failed to store Extended key:', e); return { success: false }; });
     }
-    getExtendedApiKey(id) { 
-        return this.state.extendedApiKeys[id] || null; 
+
+    /** Check if an Extended API key cookie exists on the server. Returns Promise<boolean>. */
+    async checkExtendedKeyExists(id) {
+        try {
+            const r = await fetch(`/api/exchanges/keys/check?type=extended&entryId=${encodeURIComponent(id)}`, { credentials: 'include' });
+            const data = await r.json();
+            return !!data.exists;
+        } catch(e) { return false; }
     }
-    
+
     setVariationalToken(id, token) { 
-        this.state.variationalTokens[id] = token;
-        // Store in HttpOnly cookie via backend
-        fetch('/api/exchanges/keys/store', {
+        // Store in HttpOnly cookie via backend. Token is NOT kept in memory.
+        return fetch('/api/exchanges/keys/store', {
             method: 'POST',
             headers: this._csrfHeaders,
             credentials: 'include',
             body: JSON.stringify({ type: 'variational', entryId: id, value: token })
-        }).catch(e => console.error('Failed to store Variational token:', e));
+        }).then(r => r.json()).catch(e => { console.error('Failed to store Variational token:', e); return { success: false }; });
     }
-    getVariationalToken(id) { 
-        return this.state.variationalTokens[id] || null; 
+
+    /** Check if a Variational token cookie exists on the server. Returns Promise<boolean>. */
+    async checkVariationalTokenExists(id) {
+        try {
+            const r = await fetch(`/api/exchanges/keys/check?type=variational&entryId=${encodeURIComponent(id)}`, { credentials: 'include' });
+            const data = await r.json();
+            return !!data.exists;
+        } catch(e) { return false; }
     }
 
     /**
@@ -134,7 +143,7 @@ class WalletManager {
         const addr = (walletAddress || this.state.address || '').toLowerCase();
         
         const entry = {
-            id: exchange + '_' + addr.slice(2, 8) + '_' + Date.now(),
+            id: crypto.randomUUID(), // collision-proof
             exchange,
             walletAddress: addr || null,
             label: label || (exchange.charAt(0).toUpperCase() + exchange.slice(1))
@@ -152,7 +161,7 @@ class WalletManager {
      */
     addVariationalManual(manualData, walletAddress = null, label = null) {
         const entry = {
-            id: 'variational_manual_' + Date.now(),
+            id: crypto.randomUUID(), // collision-proof
             exchange: 'variational',
             walletAddress: walletAddress || null,
             label: label || 'Variational',
@@ -186,7 +195,6 @@ class WalletManager {
         this.state.activeExchanges = this.state.activeExchanges.filter(e => e.id !== id);
         this._saveExchanges();
         if (entry?.exchange === 'extended') {
-            delete this.state.extendedApiKeys[id];
             // Remove HttpOnly cookie via backend
             fetch('/api/exchanges/keys/remove', {
                 method: 'POST',
@@ -196,7 +204,6 @@ class WalletManager {
             }).catch(() => {});
         }
         if (entry?.exchange === 'variational') {
-            delete this.state.variationalTokens[id];
             // Remove HttpOnly cookie via backend
             fetch('/api/exchanges/keys/remove', {
                 method: 'POST',
@@ -289,8 +296,6 @@ class WalletManager {
         this.logoutBackend();
         this.state.address = null;
         this.state.chainId = null;
-        this.state.extendedApiKeys = {};
-        this.state.variationalTokens = {};
         localStorage.removeItem('wallet_state_address');
         localStorage.removeItem('wallet_state_chainId');
         window.location.reload();

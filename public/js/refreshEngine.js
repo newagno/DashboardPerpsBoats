@@ -84,13 +84,8 @@ class RefreshEngine {
             try {
                 let data;
                 if (exchange === 'extended') {
-                    const extendedKey = window.walletManager.getExtendedApiKey(id);
-                    if (!extendedKey) {
-                        console.warn(`Ghost entry detected for extended (id: ${id}). Removing.`);
-                        window.walletManager.removeExchange(id);
-                        return null;
-                    }
-                    const obj = new window.Exchanges.Extended(extendedKey, id);
+                    // Pass null as key — backend reads it from the Vault using entryId
+                    const obj = new window.Exchanges.Extended(null, id);
                     data = await obj.getStats();
                 } else if (exchange === 'nado') {
                     // Pass walletAddress as 'walletAddress' so server uses that specific address

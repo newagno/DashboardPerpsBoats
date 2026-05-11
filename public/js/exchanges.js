@@ -40,7 +40,8 @@ class ExtendedExchange extends BaseExchange {
         return this.fetchData(`${this.PROXY_BASE}/extended/stats`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ apiKey: this.apiKey, entryId: this.entryId })
+            // Do NOT send apiKey in body — backend reads it from HttpOnly cookie by entryId
+            body: JSON.stringify({ entryId: this.entryId })
         });
     }
 }

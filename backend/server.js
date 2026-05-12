@@ -293,15 +293,26 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
         const lbData = leaderboardRes.data?.data || {};
         const rank = lbData.rank || null;
 
-        // NATIVE PNL from chart
+        // NATIVE PNL: try pnlChart endpoint first (matches website Total PnL)
         let nativeTotalPnl = 0;
         const pnlChart = pnlChartRes.data?.data || pnlChartRes.data || [];
         if (Array.isArray(pnlChart) && pnlChart.length > 0) {
             const lastPoint = pnlChart[pnlChart.length - 1];
-            nativeTotalPnl = parseFloat(lastPoint.pnl || lastPoint.value || lastPoint.totalPnl || 0);
-        } else {
-            nativeTotalPnl = parseFloat(balData.unrealisedPnl || 0);
+            // Try all known field names from Extended API
+            nativeTotalPnl = parseFloat(
+                lastPoint.totalPnl ?? lastPoint.pnl ?? lastPoint.value ?? lastPoint.cumulativePnl ?? 0
+            );
         }
+        // Fallback: unrealizedPnl from balance
+        if (nativeTotalPnl === 0) {
+            nativeTotalPnl = parseFloat(balData.unrealisedPnl || balData.unrealizedPnl || 0);
+        }
+
+        // DIAGNOSTIC: log raw balance fields to help identify correct PnL source
+        logger.info('[Extended] balData keys: ' + Object.keys(balData).join(', '));
+        logger.info('[Extended] balData values: ' + JSON.stringify(balData));
+        logger.info(`[Extended] totalIn: $${totalIn.toFixed(2)}, totalOut: $${totalOut.toFixed(2)}, deposits count: ${depositsRes.length}, withdrawals count: ${withdrawalsRes.length}`);
+        logger.info(`[Extended] pnlChart points: ${pnlChart.length}, nativePnl: $${nativeTotalPnl.toFixed(2)}, equity: $${actDeposit.toFixed(2)}, pnl(equity-net): $${pnl.toFixed(2)}`);
 
         res.json({
             init_deposit: initDeposit,
@@ -314,7 +325,17 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
             points: pointsRes.data || {},
             rank: rank,
             partial_success: errors.length > 0 ? true : undefined,
-            warnings: errors.length > 0 ? errors : undefined
+            warnings: errors.length > 0 ? errors : undefined,
+            // DEBUG: remove after investigation
+            _debug: {
+                balance_fields: balData,
+                total_in: totalIn,
+                total_out: totalOut,
+                deposits_count: depositsRes.length,
+                withdrawals_count: withdrawalsRes.length,
+                pnl_chart_points: pnlChart.length,
+                pnl_chart_last: pnlChart.length > 0 ? pnlChart[pnlChart.length - 1] : null
+            }
         });
     } catch (error) {
         logger.error('Extended Proxy Error:', error.message);
@@ -445,7 +466,17 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
         // PnL calculated via Equity - Net Deposits is much more reliable for Nado
         const finalPnl    = fullEquity - initDeposit;
 
+        // DIAGNOSTIC: Нado deposit/withdrawal breakdown
+        let totalDeposited = 0, totalWithdrawn = 0;
+        for (const ev of evts) {
+            const pre  = BigInt(ev.pre_balance?.spot?.balance?.amount  || 0);
+            const post = BigInt(ev.post_balance?.spot?.balance?.amount || 0);
+            const delta = Number(post - pre) / 1e18;
+            if (delta > 0) totalDeposited += delta;
+            else totalWithdrawn += Math.abs(delta);
+        }
         logger.info('[Nado] SnapVol: $' + totalVolumeFromSnap.toFixed(2) + ', Orders: ' + allOrders.length + ', InitDep: $' + initDeposit.toFixed(2) + ', FullEquity: $' + fullEquity.toFixed(2) + ', FinalPnl: $' + finalPnl.toFixed(2));
+        logger.info('[Nado] Events: ' + evts.length + ', TotalDeposited: $' + totalDeposited.toFixed(2) + ', TotalWithdrawn: $' + totalWithdrawn.toFixed(2) + ', NetDep: $' + (totalDeposited - totalWithdrawn).toFixed(2));
 
         res.json({
             snapshot: { assets: fullEquity },
@@ -458,7 +489,19 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
             pnl: finalPnl,
             win_rate: winRate,
             rank: rank,
-            wallet: targetAddress
+            wallet: targetAddress,
+            // DEBUG: remove after investigation
+            _debug: {
+                events_count: evts.length,
+                total_deposited: totalDeposited,
+                total_withdrawn: totalWithdrawn,
+                net_deposits: totalDeposited - totalWithdrawn,
+                full_equity: fullEquity,
+                settled_equity: totalEquity,
+                native_pnl: nativeTotalPnl,
+                orders_count: allOrders.length,
+                pnl_from_trades: pnlFromTrades
+            }
         });
 
     } catch (error) {

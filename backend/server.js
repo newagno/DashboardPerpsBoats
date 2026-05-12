@@ -241,9 +241,9 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
         const initDeposit = totalIn - totalOut;
 
         // ACT_DEPOSIT
-        // Prioritize balance (which matches equity contrib / realized collateral) over equity (which includes unrealized pnl)
+        // Prioritize equity (total account value including unrealized PnL) over balance (settled/realized only)
         const balData = balanceRes.data?.data || balanceRes.data || {};
-        const actDeposit = parseFloat(balData.balance || balData.equity || 0);
+        const actDeposit = parseFloat(balData.equity ?? balData.balance ?? 0);
 
         // VOLUME method 1: sum of all trades notional value
         // Docs: GET /api/v1/user/trades → value = actual filled absolute nominal value

@@ -208,15 +208,17 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
         };
 
         // Fetch all endpoints in parallel
-        const [balanceRes, tradesRes, pointsRes, opsRes, leaderboardRes, positionsRes, ordersHistRes] = await Promise.all([
+        const [balanceRes, tradesRes, pointsRes, depositsRes, withdrawalsRes, leaderboardRes, positionsRes, ordersHistRes] = await Promise.all([
             http.get(`${BASE}/user/balance`, { headers })
                 .catch(e => { errors.push(`balance: ${e.message}`); logger.error('Extended balance error:', e.message); return { data: {} }; }),
             fetchAllPaginated('/user/trades')
                 .catch(e => { errors.push(`trades: ${e.message}`); logger.error('Extended trades error:', e.message); return []; }),
             http.get(`${BASE}/user/rewards/earned`, { headers })
                 .catch(e => { errors.push(`points: ${e.message}`); logger.error('Extended points error:', e.message); return { data: { data: [] } }; }),
-            fetchAllPaginated('/user/assetOperations')
-                .catch(e => { errors.push(`ops: ${e.message}`); logger.error('Extended ops error:', e.message); return []; }),
+            fetchAllPaginated('/user/assetOperations?type=DEPOSIT&status=COMPLETED')
+                .catch(e => { errors.push(`ops_dep: ${e.message}`); logger.error('Extended deps error:', e.message); return []; }),
+            fetchAllPaginated('/user/assetOperations?type=WITHDRAWAL&status=COMPLETED')
+                .catch(e => { errors.push(`ops_with: ${e.message}`); logger.error('Extended with error:', e.message); return []; }),
             http.get(`${BASE}/user/rewards/leaderboard/stats`, { headers })
                 .catch(e => { errors.push(`leaderboard: ${e.message}`); logger.error('Extended leaderboard error:', e.message); return { data: { data: {} } }; }),
             fetchAllPaginated('/user/positions/history')
@@ -227,13 +229,12 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
         ]);
 
         // INIT_DEPOSIT = sum(DEPOSIT amounts) - sum(WITHDRAWAL amounts)
-        // Docs: GET /api/v1/user/assetOperations, type field = "DEPOSIT" | "WITHDRAWAL"
-        // amount is signed (negative for withdrawals in some cases) - use type to determine direction
         let totalIn = 0, totalOut = 0;
-        for (const op of opsRes) {
-            const amt = Math.abs(parseFloat(op.amount || 0));
-            if (op.type === 'DEPOSIT' && op.status === 'COMPLETED') totalIn += amt;
-            else if (op.type === 'WITHDRAWAL' && op.status === 'COMPLETED') totalOut += amt;
+        for (const op of depositsRes) {
+            totalIn += Math.abs(parseFloat(op.amount || 0));
+        }
+        for (const op of withdrawalsRes) {
+            totalOut += Math.abs(parseFloat(op.amount || 0));
         }
         const initDeposit = totalIn - totalOut;
 
@@ -358,7 +359,7 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
         // 3. INIT_DEPOSIT via collateral events (delta = post - pre spot balance)
         //    No product_id filter — captures both USDT0 (id:0) and USDC (id:5) deposits
         const evRes = await http.post('https://archive.prod.nado.xyz/v1', {
-            events: { subaccounts: [sender], event_types: ['deposit_collateral', 'withdraw_collateral', 'transfer_quote'], limit: { raw: 500 } }
+            events: { subaccounts: [sender], event_types: ['deposit_collateral', 'withdraw_collateral'], limit: { raw: 500 } }
         }, { headers: archiveHeaders }).catch(() => ({ data: {} }));
 
         let initDepositFromEvents = 0;

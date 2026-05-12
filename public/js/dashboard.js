@@ -558,6 +558,9 @@ class DashboardManager {
         }
         const roiClass = roi >= 0 ? 'positive' : 'negative';
 
+        const nativePnlRow = (data.native_pnl !== undefined) ? 
+            `<div class="wallet-stat" style="border-top: 1px dashed rgba(255,255,255,0.1); margin-top:2px; padding-top:4px;"><span class="stat-label" style="color: rgba(255,255,255,0.5);">06.1 // NATIVE_PNL</span><span class="stat-value ${data.native_pnl >= 0 ? 'positive' : 'negative'}" style="font-size:12px;">${window.Utils.formatCurrency(data.native_pnl)}</span></div>` : '';
+
         card.innerHTML = headerHtml(editBtnHtml) + `
             <div class="wallet-stats-grid">
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_init_deposit') : '01 // INIT_DEPOSIT'}</span><span class="stat-value">${window.Utils.formatCurrency(data.initDeposit)}</span></div>
@@ -566,6 +569,7 @@ class DashboardManager {
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_points') : '04 // POINTS'}</span><span class="stat-value">${(data.points || 0).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_rank') : '05 // RANK'}</span><span class="stat-value">${data.rank ? data.rank : 'N/A'}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_pnl') : '06 // PNL'}</span><span class="stat-value ${pnlClass}">${window.Utils.formatCurrency(data.pnl)}</span></div>
+                ${nativePnlRow}
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_win_rate') : '07 // WIN_RATE'}</span><span class="stat-value">${window.Utils.formatPercent(data.winRate)}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_roi') : '08 // ROI'}</span><span class="stat-value ${roiClass}">${window.Utils.formatPercent(roi)}</span></div>
                 <div class="wallet-stat" style="border-top: 1px dashed rgba(255,72,54,0.3); margin-top:2px;"><span class="stat-label" style="color: rgba(255,72,54,0.7);">${window.i18n ? window.i18n.t('card_point_value') : '09 // $/POINT'}</span><span class="stat-value" style="color: rgba(255,72,54,0.9); font-size:12px;">${pointValue}</span></div>
@@ -627,6 +631,9 @@ class DashboardManager {
         d.volume      = rawData.total_volume || 0;
         d.winRate     = rawData.win_rate     || 0;
         d.rank        = rawData.rank;
+        if (rawData.native_pnl !== undefined) {
+            d.native_pnl = rawData.native_pnl;
+        }
         // PNL = ACT_DEPOSIT - INIT_DEPOSIT (universal formula for all exchanges)
         d.pnl         = d.actDeposit - d.initDeposit;
 

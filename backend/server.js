@@ -208,7 +208,7 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
         };
 
         // Fetch all endpoints in parallel
-        const [balanceRes, tradesRes, pointsRes, depositsRes, withdrawalsRes, leaderboardRes, positionsRes, ordersHistRes] = await Promise.all([
+        const [balanceRes, tradesRes, pointsRes, depositsRes, withdrawalsRes, leaderboardRes, positionsRes, ordersHistRes, pnlChartRes] = await Promise.all([
             http.get(`${BASE}/user/balance`, { headers })
                 .catch(e => { errors.push(`balance: ${e.message}`); logger.error('Extended balance error:', e.message); return { data: {} }; }),
             fetchAllPaginated('/user/trades')
@@ -225,7 +225,9 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
                 .catch(e => { errors.push(`positions: ${e.message}`); logger.error('Extended positions error:', e.message); return []; }),
             // Also fetch filled orders history — trades endpoint may miss some fills
             fetchAllPaginated('/user/orders/history')
-                .catch(e => { errors.push(`orders: ${e.message}`); logger.error('Extended orders hist error:', e.message); return []; })
+                .catch(e => { errors.push(`orders: ${e.message}`); logger.error('Extended orders hist error:', e.message); return []; }),
+            http.get(`${BASE}/portfolio/charts/pnl?interval=ALL&pnlType=TOTAL_PNL`, { headers })
+                .catch(e => { errors.push(`pnlChart: ${e.message}`); logger.error('Extended pnlChart error:', e.message); return { data: { data: [] } }; })
         ]);
 
         // INIT_DEPOSIT = sum(DEPOSIT amounts) - sum(WITHDRAWAL amounts)
@@ -291,9 +293,20 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
         const lbData = leaderboardRes.data?.data || {};
         const rank = lbData.rank || null;
 
+        // NATIVE PNL from chart
+        let nativeTotalPnl = 0;
+        const pnlChart = pnlChartRes.data?.data || pnlChartRes.data || [];
+        if (Array.isArray(pnlChart) && pnlChart.length > 0) {
+            const lastPoint = pnlChart[pnlChart.length - 1];
+            nativeTotalPnl = parseFloat(lastPoint.pnl || lastPoint.value || lastPoint.totalPnl || 0);
+        } else {
+            nativeTotalPnl = parseFloat(balData.unrealisedPnl || 0);
+        }
+
         res.json({
             init_deposit: initDeposit,
             act_deposit: actDeposit,
+            native_pnl: nativeTotalPnl,
             total_volume: finalVolume,
             pnl: pnl,
             win_rate: winRate,
@@ -369,6 +382,23 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
             const post = BigInt(ev.post_balance?.spot?.balance?.amount || 0);
             initDepositFromEvents += Number(post - pre) / 1e18;
         }
+
+        // NATIVE PNL (Unsettled USDT0 / Unrealized PnL)
+        let nativeTotalPnl = 0;
+        const perpBalances = subRes.data?.data?.perp_balances || subRes.data?.perp_balances || [];
+        const perpProducts = subRes.data?.data?.perp_products || subRes.data?.perp_products || [];
+        
+        for (const pb of perpBalances) {
+            const pid = pb.product_id;
+            const product = perpProducts.find(p => p.product_id === pid);
+            if (product) {
+                const amount = parseFloat(pb.balance?.amount || pb.amount || 0) / 1e18;
+                const vQuote = parseFloat(pb.balance?.v_quote_balance || pb.v_quote_balance || 0) / 1e18;
+                const price = parseFloat(product.oracle_price_x18 || 0) / 1e18;
+                nativeTotalPnl += (amount * price) + vQuote;
+            }
+        }
+
         const initDeposit = evts.length > 0 ? initDepositFromEvents : initDepositFromSnap;
 
         // 4. Orders for PNL + WIN_RATE
@@ -415,6 +445,7 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
             points: totalPoints,
             init_deposit: initDeposit,
             act_deposit: totalEquity,
+            native_pnl: nativeTotalPnl,
             total_volume: finalVolume,
             pnl: finalPnl,
             win_rate: winRate,

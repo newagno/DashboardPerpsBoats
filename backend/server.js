@@ -372,7 +372,7 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
         // 3. INIT_DEPOSIT via collateral events (delta = post - pre spot balance)
         //    No product_id filter — captures both USDT0 (id:0) and USDC (id:5) deposits
         const evRes = await http.post('https://archive.prod.nado.xyz/v1', {
-            events: { subaccounts: [sender], event_types: ['deposit_collateral', 'withdraw_collateral'], limit: { raw: 500 } }
+            events: { subaccounts: [sender], event_types: ['deposit_collateral', 'withdraw_collateral'], limit: { raw: 2000 } }
         }, { headers: archiveHeaders }).catch(() => ({ data: {} }));
 
         let initDepositFromEvents = 0;
@@ -399,6 +399,9 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
             }
         }
 
+        // Total Active Deposit (Equity) = Settled Spot + Unrealized PnL
+        const fullEquity = totalEquity + nativeTotalPnl;
+
         const initDeposit = evts.length > 0 ? initDepositFromEvents : initDepositFromSnap;
 
         // 4. Orders for PNL + WIN_RATE
@@ -410,7 +413,11 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
             if (cursor) pld.orders.idx = cursor;
             const r = await http.post('https://archive.prod.nado.xyz/v1', pld, { headers: archiveHeaders }).catch(() => null);
             const batch = r?.data?.orders || [];
-            if (batch.length > 0) { cursor = batch[batch.length-1].submission_idx; allOrders = allOrders.concat(batch); if (batch.length < 100) hasMore = false; }
+            if (batch.length > 0) { 
+                cursor = batch[batch.length-1].idx; // Use idx for pagination, not submission_idx
+                allOrders = allOrders.concat(batch); 
+                if (batch.length < 100) hasMore = false; 
+            }
             else hasMore = false;
         }
 
@@ -435,16 +442,17 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
         const rank = allTime.rank ? parseInt(allTime.rank) : null;
 
         const finalVolume = totalVolumeFromSnap;
-        const finalPnl    = pnlFromTrades;
+        // PnL calculated via Equity - Net Deposits is much more reliable for Nado
+        const finalPnl    = fullEquity - initDeposit;
 
-        logger.info('[Nado] SnapVol: $' + totalVolumeFromSnap.toFixed(2) + ', Orders: ' + allOrders.length + ', InitDep(events,' + evts.length + '): $' + initDepositFromEvents.toFixed(2) + ', InitDep(snap): $' + initDepositFromSnap.toFixed(2) + ', Used: $' + initDeposit.toFixed(2));
+        logger.info('[Nado] SnapVol: $' + totalVolumeFromSnap.toFixed(2) + ', Orders: ' + allOrders.length + ', InitDep: $' + initDeposit.toFixed(2) + ', FullEquity: $' + fullEquity.toFixed(2) + ', FinalPnl: $' + finalPnl.toFixed(2));
 
         res.json({
-            snapshot: { assets: totalEquity },
+            snapshot: { assets: fullEquity },
             matches: allOrders,
             points: totalPoints,
             init_deposit: initDeposit,
-            act_deposit: totalEquity,
+            act_deposit: fullEquity,
             native_pnl: nativeTotalPnl,
             total_volume: finalVolume,
             pnl: finalPnl,
@@ -452,6 +460,7 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
             rank: rank,
             wallet: targetAddress
         });
+
     } catch (error) {
         logger.error('Nado Proxy Error:', error.message);
         res.status(500).json({ error: 'Failed to fetch Nado exchange data. Please try again.' });

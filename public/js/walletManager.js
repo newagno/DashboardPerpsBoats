@@ -190,7 +190,8 @@ class WalletManager {
      */
     async addExchange(exchange, walletAddress = null, label = null, bypassAuth = false) {
         if (!bypassAuth && exchange !== 'nado' && !this.state.isAuthenticated) {
-            if (this.state.address) {
+            const isWalletConnected = window.appKit && typeof window.appKit.getIsConnected === 'function' && window.appKit.getIsConnected();
+            if (this.state.address && isWalletConnected) {
                 try { await this.loginToBackend(); } catch (e) { return { success: false, error: 'Login cancelled' }; }
             } else {
                 await this.connectMetaMask();
@@ -218,14 +219,6 @@ class WalletManager {
      * @param {string|null} label - display label
      */
     async addVariationalManual(manualData, walletAddress = null, label = null) {
-        if (!this.state.isAuthenticated) {
-            if (this.state.address) {
-                try { await this.loginToBackend(); } catch (e) { return { success: false, error: 'Login cancelled' }; }
-            } else {
-                await this.connectMetaMask();
-                try { await this.loginToBackend(); } catch (e) { return { success: false, error: 'Login cancelled' }; }
-            }
-        }
         const entry = {
             id: _generateId(),
             exchange: 'variational',
@@ -246,14 +239,6 @@ class WalletManager {
      * @param {string|null} walletAddress - specific wallet address
      */
     async updateVariationalManual(id, manualData, walletAddress = null) {
-        if (!this.state.isAuthenticated) {
-            if (this.state.address) {
-                try { await this.loginToBackend(); } catch (e) { return false; }
-            } else {
-                await this.connectMetaMask();
-                try { await this.loginToBackend(); } catch (e) { return false; }
-            }
-        }
         const entry = this.state.activeExchanges.find(e => e.id === id);
         if (!entry || entry.exchange !== 'variational') return false;
         entry.manualData = { ...manualData, inputDate: Date.now() };
@@ -269,9 +254,10 @@ class WalletManager {
     async removeExchange(id) {
         const entry = this.state.activeExchanges.find(e => e.id === id); // Одне оголошення
 
-        // Перевірка прав (якщо це не Nado, вимагаємо авторизацію)
-        if (entry && entry.exchange !== 'nado' && !this.state.isAuthenticated) {
-            if (this.state.address) {
+        // Перевірка прав (якщо це не Nado та не Variational, вимагаємо авторизацію)
+        if (entry && entry.exchange !== 'nado' && entry.exchange !== 'variational' && !this.state.isAuthenticated) {
+            const isWalletConnected = window.appKit && typeof window.appKit.getIsConnected === 'function' && window.appKit.getIsConnected();
+            if (this.state.address && isWalletConnected) {
                 try { await this.loginToBackend(); } catch (e) { return; }
             } else {
                 await this.connectMetaMask();

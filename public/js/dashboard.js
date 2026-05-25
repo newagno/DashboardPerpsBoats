@@ -313,7 +313,8 @@ class DashboardManager {
                 return;
             }
 
-            const result = await window.walletManager.addExchange(exc, walletAddr, label).catch(e => ({ success: false, error: e.message }));
+            const isPublic = (exc === 'nado');
+            const result = await window.walletManager.addExchange(exc, walletAddr, label, isPublic).catch(e => ({ success: false, error: e.message }));
             if (!result || !result.success) {
                 const errMsg = result?.error || (window.i18n ? window.i18n.t('please_login_first') : 'Auth error. Please connect wallet and sign.');
                 const vm = document.getElementById('wallet-addr-validation');

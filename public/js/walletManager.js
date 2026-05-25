@@ -186,9 +186,10 @@ class WalletManager {
      * @param {string} exchange - 'extended' | 'nado'
      * @param {string|null} walletAddress - specific wallet address (null = use session address)
      * @param {string|null} label - display label
+     * @param {boolean} bypassAuth - if true, skips signatures / auth check (e.g. for Nado)
      */
-    async addExchange(exchange, walletAddress = null, label = null) {
-        if (exchange !== 'nado' && !this.state.isAuthenticated) {
+    async addExchange(exchange, walletAddress = null, label = null, bypassAuth = false) {
+        if (!bypassAuth && exchange !== 'nado' && !this.state.isAuthenticated) {
             if (this.state.address) {
                 try { await this.loginToBackend(); } catch (e) { return { success: false, error: 'Login cancelled' }; }
             } else {

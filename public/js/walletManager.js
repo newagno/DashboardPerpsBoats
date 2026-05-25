@@ -190,12 +190,16 @@ class WalletManager {
      */
     async addExchange(exchange, walletAddress = null, label = null, bypassAuth = false) {
         if (!bypassAuth && exchange !== 'nado' && !this.state.isAuthenticated) {
-            const isWalletConnected = window.appKit && typeof window.appKit.getIsConnected === 'function' && window.appKit.getIsConnected();
-            if (this.state.address && isWalletConnected) {
+            const isWalletConnected = !!this.state.address;
+            if (isWalletConnected) {
                 try { await this.loginToBackend(); } catch (e) { return { success: false, error: 'Login cancelled' }; }
             } else {
                 await this.connectMetaMask();
-                try { await this.loginToBackend(); } catch (e) { return { success: false, error: 'Login cancelled' }; }
+                if (this.state.address) {
+                    try { await this.loginToBackend(); } catch (e) { return { success: false, error: 'Login cancelled' }; }
+                } else {
+                    return { success: false, error: 'Wallet not connected' };
+                }
             }
         }
         const addr = (walletAddress || this.state.address || '').toLowerCase();
@@ -256,12 +260,16 @@ class WalletManager {
 
         // Перевірка прав (якщо це не Nado та не Variational, вимагаємо авторизацію)
         if (entry && entry.exchange !== 'nado' && entry.exchange !== 'variational' && !this.state.isAuthenticated) {
-            const isWalletConnected = window.appKit && typeof window.appKit.getIsConnected === 'function' && window.appKit.getIsConnected();
-            if (this.state.address && isWalletConnected) {
+            const isWalletConnected = !!this.state.address;
+            if (isWalletConnected) {
                 try { await this.loginToBackend(); } catch (e) { return; }
             } else {
                 await this.connectMetaMask();
-                try { await this.loginToBackend(); } catch (e) { return; }
+                if (this.state.address) {
+                    try { await this.loginToBackend(); } catch (e) { return; }
+                } else {
+                    return;
+                }
             }
         }
 
@@ -292,13 +300,10 @@ class WalletManager {
         try {
             await window.appKit.open();
             let timeout = 60000, start = Date.now();
-            while (!window.appKit.getIsConnected() && (Date.now() - start < timeout)) {
+            while (!this.state.address && (Date.now() - start < timeout)) {
                 await new Promise(r => setTimeout(r, 500));
             }
-            if (window.appKit.getIsConnected()) {
-                this.state.address = window.appKit.getAddress();
-                this.state.chainId = '0x' + window.appKit.getChainId().toString(16);
-                localStorage.setItem('wallet_state_address', this.state.address);
+            if (this.state.address) {
                 return true;
             }
             return false;
@@ -338,8 +343,14 @@ class WalletManager {
             };
 
             const provider = new ethers.providers.Web3Provider(window.appKit.getWalletProvider());
+            const network = await provider.getNetwork().catch(() => ({ chainId: 1 }));
+            const chainIdNum = network.chainId || 1;
+            
+            this.state.chainId = '0x' + chainIdNum.toString(16);
+            localStorage.setItem('wallet_state_chainId', this.state.chainId);
+
             const signer = provider.getSigner();
-            const domain = { ...this.DOMAIN_BASE, chainId: parseInt(this.state.chainId, 16) };
+            const domain = { ...this.DOMAIN_BASE, chainId: chainIdNum };
             const finalTypes = { ...types };
             delete finalTypes.EIP712Domain;
 

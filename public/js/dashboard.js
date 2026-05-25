@@ -232,7 +232,8 @@ class DashboardManager {
         }
 
         this.btnSaveExchange.addEventListener('click', async () => {
-            const exc = this.exchangeSelect.value;
+            try {
+                const exc = this.exchangeSelect.value;
             if (!exc) return;
             if (!window.walletManager) {
                 console.error('WalletManager not yet initialized');
@@ -351,6 +352,11 @@ class DashboardManager {
             this.updateAllWalletCards(remaining);
 
             window.refreshEngine.refresh();
+            
+            } catch (err) {
+                console.error("Error saving exchange:", err);
+                alert("An unexpected error occurred. Please try again.");
+            }
         });
 
         document.getElementById('refresh-btn').addEventListener('click', () => {

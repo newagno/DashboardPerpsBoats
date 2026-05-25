@@ -56,6 +56,26 @@ const storeKeySchema = z.object({
     value: z.string().min(1).max(4096)
 });
 
+const activeExchangesSchema = z.object({
+    activeExchanges: z.array(z.object({
+        id: z.string().min(1).max(128),
+        exchange: z.enum(['extended', 'nado', 'variational']),
+        walletAddress: z.string().regex(/^0x[a-fA-F0-9]{40,66}$/, 'Invalid wallet address format').nullable().optional(),
+        label: z.string().min(1).max(100).nullable().optional(),
+        updatedAt: z.string().datetime().optional().nullable(),
+        manualData: z.object({
+            initDeposit: z.number().nonnegative().optional(),
+            actDeposit: z.number().nonnegative().optional(),
+            volume: z.number().nonnegative().optional(),
+            points: z.number().nonnegative().optional(),
+            rank: z.string().max(32).nullable().optional(),
+            winRate: z.number().min(0).max(100).optional(),
+            roi: z.number().optional(),
+            inputDate: z.number().int().positive().optional()
+        }).nullable().optional()
+    }))
+});
+
 // ── Middleware factory ────────────────────────────────────────────────────────
 
 /**
@@ -84,7 +104,8 @@ module.exports = {
         extendedStatsSchema,
         nadoStatsSchema,
         variationalStatsSchema,
-        storeKeySchema
+        storeKeySchema,
+        activeExchangesSchema
     },
     validate
 };

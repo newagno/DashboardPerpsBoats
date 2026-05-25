@@ -18,6 +18,21 @@ const isProd = process.env.NODE_ENV === 'production';
 // ── Initialize Redis (async, non-blocking) ──────────────────────────────────
 store.initRedis().catch(err => logger.error('Redis init failed:', err));
 
+// ── Initialize Redis Pub/Sub sync clients ───────────────────────────────────
+let redisPublisher = null;
+if (process.env.REDIS_URL) {
+    const Redis = require('ioredis');
+    redisPublisher = new Redis(process.env.REDIS_URL, {
+        maxRetriesPerRequest: 3,
+        connectTimeout: 5000,
+        lazyConnect: true
+    });
+    redisPublisher.connect().catch(err => logger.error('Redis sync publisher connection failed:', err.message));
+}
+
+const EventEmitter = require('events');
+const localSyncEmitter = new EventEmitter();
+
 // Axios instance with global timeout (reduced for Vercel)
 const http = axios.create({ timeout: isProd ? 9000 : 60000 });
 
@@ -121,6 +136,110 @@ app.get('/api/auth/check', async (req, res) => {
         return res.json({ authenticated: false, address: null });
     }
     res.json({ authenticated: true, address: session.address });
+});
+
+// ─── Active Exchanges Sync (Authenticated & Real-time) ──────────────────────
+
+// Server-Sent Events (SSE) stream for real-time exchange list updates
+app.get('/api/exchanges/sync', authController.requireAuth, (req, res) => {
+    const address = req.user.address.toLowerCase();
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    // Send connection established event
+    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+
+    const onUpdate = (exchanges) => {
+        res.write(`data: ${JSON.stringify({ type: 'update', exchanges })}\n\n`);
+    };
+
+    // Listen to local memory updates
+    localSyncEmitter.on('sync:' + address, onUpdate);
+
+    // Dedicated Redis subscriber connection for this SSE client session
+    let redisSub = null;
+    const redisChannel = `user:exchanges:${address}`;
+
+    if (process.env.REDIS_URL) {
+        const Redis = require('ioredis');
+        redisSub = new Redis(process.env.REDIS_URL, {
+            maxRetriesPerRequest: 3,
+            connectTimeout: 5000,
+            lazyConnect: true
+        });
+        
+        redisSub.connect()
+            .then(() => redisSub.subscribe(redisChannel))
+            .catch(err => logger.error(`Redis SSE subscriber failed for ${address}:`, err.message));
+
+        redisSub.on('message', (channel, message) => {
+            if (channel === redisChannel) {
+                try {
+                    const exchanges = JSON.parse(message);
+                    onUpdate(exchanges);
+                } catch (e) {
+                    logger.error('Failed to parse Redis Pub/Sub sync event payload:', e);
+                }
+            }
+        });
+    }
+
+    // Periodical heartbeats to maintain active connection and prevent timeouts
+    const heartbeat = setInterval(() => {
+        res.write(': heartbeat\n\n');
+    }, 15000);
+
+    req.on('close', () => {
+        clearInterval(heartbeat);
+        localSyncEmitter.removeListener('sync:' + address, onUpdate);
+        if (redisSub) {
+            redisSub.quit().catch(() => {});
+        }
+    });
+});
+
+// GET currently active synced exchanges
+app.get('/api/exchanges/active', authController.requireAuth, async (req, res) => {
+    try {
+        const address = req.user.address.toLowerCase();
+        const activeExchanges = await store.get(`exchanges:active:${address}`);
+        res.json(activeExchanges || []);
+    } catch (e) {
+        logger.error('Failed to retrieve active exchanges:', e);
+        res.status(500).json({ error: 'Failed to fetch active exchanges' });
+    }
+});
+
+// POST update/sync active exchanges list
+app.post('/api/exchanges/active', csrfProtect, authController.requireAuth, validate(schemas.activeExchangesSchema, 'body'), async (req, res) => {
+    try {
+        const address = req.user.address.toLowerCase();
+        const { activeExchanges } = req.validatedBody || req.body;
+
+        // Persist globally (uses Redis if available, falls back to memory)
+        await store.set(`exchanges:active:${address}`, activeExchanges);
+
+        // Propagate locally (multi-tab sync in same node process)
+        localSyncEmitter.emit('sync:' + address, activeExchanges);
+
+        // Propagate globally (multi-device sync across different server instances)
+        if (redisPublisher) {
+            try {
+                await redisPublisher.publish(`user:exchanges:${address}`, JSON.stringify(activeExchanges));
+            } catch (err) {
+                logger.error('Redis Pub/Sub publish failed:', err.message);
+            }
+        }
+
+        logger.info(`Synced ${activeExchanges.length} active exchanges for ${logger.maskAddress(address)}`);
+        res.json({ success: true });
+    } catch (e) {
+        logger.error('Failed to save active exchanges sync:', e);
+        res.status(500).json({ error: 'Failed to save active exchanges' });
+    }
 });
 
 // ─── Secure Key Store (HttpOnly Cookies) ───────────────────────────────────

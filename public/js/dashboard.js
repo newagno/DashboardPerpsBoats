@@ -114,6 +114,14 @@ class DashboardManager {
         this.setupEasterEgg();
         this.setupEventListeners();
         
+        // Wait for session check and cross-device exchange synchronization
+        if (window.walletManager && typeof window.walletManager.checkSession === 'function') {
+            await window.walletManager.checkSession();
+            if (window.walletManager.state.isAuthenticated) {
+                await window.walletManager.syncExchangesWithBackend();
+            }
+        }
+        
         const hasExchanges = window.walletManager.state.activeExchanges.length > 0;
         if (hasExchanges) {
             this.renderLoading();
@@ -131,6 +139,28 @@ class DashboardManager {
                 this.updateAllWalletCards(remaining);
                 window.refreshEngine.refresh();
             }
+        });
+
+        // Listen for Server-Sent Events (SSE) active exchanges updates
+        window.addEventListener('exchanges-synced', (e) => {
+            console.log('UI caught exchanges-synced event. Re-rendering...');
+            const exchanges = e.detail;
+            
+            // Map the synced exchanges to their current display states
+            const cardsData = exchanges.map(exc => {
+                // If we already have loaded data in memory for this exchange id, keep it
+                const existingData = this.walletData[exc.id];
+                if (existingData) {
+                    return { ...exc, success: true, data: existingData };
+                } else {
+                    return { ...exc, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...' };
+                }
+            });
+            
+            this.updateAllWalletCards(cardsData);
+            
+            // Trigger a silent background refresh to load any missing/newly added exchange stats
+            window.refreshEngine.refresh();
         });
     }
 
@@ -738,6 +768,8 @@ class DashboardManager {
         });
         
         if (newExchanges.length === window.walletManager.state.activeExchanges.length) {
+            // Set new updatedAt timestamp for reordered active exchanges so they propagate as newer
+            newExchanges.forEach(exc => exc.updatedAt = new Date().toISOString());
             window.walletManager.state.activeExchanges = newExchanges;
             window.walletManager._saveExchanges();
         }

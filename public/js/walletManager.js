@@ -1,18 +1,17 @@
 /**
  * WalletManager — handles MetaMask connection, local UI state persistence,
- * and EIP-712 Session Authentication.
+ * EIP-712 Session Authentication, and real-time backend synchronization.
  *
  * Multi-wallet: activeExchanges is now an array of objects:
- *   { exchange: 'nado', walletAddress: '0x...', label: 'Nado Main' }
- * For Extended, walletAddress is the authenticated session address (one per session).
+ *   { id, exchange, walletAddress, label, updatedAt, manualData }
  */
 class WalletManager {
     constructor() {
         this.state = {
             address: null,
             chainId: null,
-            activeExchanges: [] // Array of { id, exchange, walletAddress, label }
-            // Note: API keys are NEVER stored here. They live only in HttpOnly cookies on the server.
+            activeExchanges: [], // Array of { id, exchange, walletAddress, label, updatedAt, manualData }
+            isAuthenticated: false
         };
 
         // CSRF header for all backend POST requests
@@ -26,6 +25,10 @@ class WalletManager {
             version: '2.0',
             verifyingContract: '0x0000000000000000000000000000000000000000'
         };
+
+        this._syncDebounceTimer = null;
+        this._reconnectTimer = null;
+        this._syncEventSource = null;
 
         this.init();
     }
@@ -52,7 +55,8 @@ class WalletManager {
                         id: exc + '_' + Date.now() + '_' + Math.random().toString(36).slice(2),
                         exchange: exc,
                         walletAddress: null, // will use session address
-                        label: exc.charAt(0).toUpperCase() + exc.slice(1)
+                        label: exc.charAt(0).toUpperCase() + exc.slice(1),
+                        updatedAt: new Date(0).toISOString()
                     }));
                     this._saveExchanges();
                 } catch(e) {}
@@ -80,6 +84,18 @@ class WalletManager {
                 if (account.isConnected && account.address !== this.state.address) {
                     this.state.address = account.address;
                     localStorage.setItem('wallet_state_address', account.address);
+                    
+                    // Re-validate session when account changes
+                    this.checkSession().then((isValid) => {
+                        if (isValid) {
+                            this.syncExchangesWithBackend();
+                        } else {
+                            // Session missing or expired (e.g. cleared cache). Prompt for signature to authenticate and sync.
+                            this.loginToBackend().catch(err => {
+                                console.error('Login signature rejected or failed:', err);
+                            });
+                        }
+                    });
                 } else if (!account.isConnected && this.state.address) {
                     this.disconnect();
                 }
@@ -89,6 +105,9 @@ class WalletManager {
 
     _saveExchanges() {
         localStorage.setItem('wallet_state_exchanges_v3', JSON.stringify(this.state.activeExchanges));
+        if (this.state.isAuthenticated) {
+            this.syncExchangesToBackend().catch(err => console.error('Failed to save exchanges to server:', err));
+        }
     }
 
     async waitForAppKit() {
@@ -146,7 +165,8 @@ class WalletManager {
             id: crypto.randomUUID(), // collision-proof
             exchange,
             walletAddress: addr || null,
-            label: label || (exchange.charAt(0).toUpperCase() + exchange.slice(1))
+            label: label || (exchange.charAt(0).toUpperCase() + exchange.slice(1)),
+            updatedAt: new Date().toISOString()
         };
         this.state.activeExchanges.push(entry);
         this._saveExchanges();
@@ -165,7 +185,8 @@ class WalletManager {
             exchange: 'variational',
             walletAddress: walletAddress || null,
             label: label || 'Variational',
-            manualData: { ...manualData, inputDate: Date.now() }
+            manualData: { ...manualData, inputDate: Date.now() },
+            updatedAt: new Date().toISOString()
         };
         this.state.activeExchanges.push(entry);
         this._saveExchanges();
@@ -183,6 +204,7 @@ class WalletManager {
         if (!entry || entry.exchange !== 'variational') return false;
         entry.manualData = { ...manualData, inputDate: Date.now() };
         if (walletAddress !== null) entry.walletAddress = walletAddress;
+        entry.updatedAt = new Date().toISOString();
         this._saveExchanges();
         return true;
     }
@@ -211,7 +233,6 @@ class WalletManager {
                 credentials: 'include',
                 body: JSON.stringify({ type: 'variational', entryId: id })
             }).catch(() => {});
-            // manualData is stored inside the entry object in activeExchanges — already removed above
         }
     }
 
@@ -281,6 +302,9 @@ class WalletManager {
             });
 
             if (!verifyRes.ok) throw new Error("Session verification failed");
+            
+            this.state.isAuthenticated = true;
+            await this.syncExchangesWithBackend();
             return true;
         } catch (e) {
             console.error("Auth flow error:", e);
@@ -296,9 +320,194 @@ class WalletManager {
         this.logoutBackend();
         this.state.address = null;
         this.state.chainId = null;
+        this.state.isAuthenticated = false;
+        if (this._syncEventSource) {
+            this._syncEventSource.close();
+            this._syncEventSource = null;
+        }
         localStorage.removeItem('wallet_state_address');
         localStorage.removeItem('wallet_state_chainId');
         window.location.reload();
+    }
+
+    // ─── Robust Synchronization Strategies ─────────────────────────────────────
+
+    /** Query check session endpoint on app load. Sets isAuthenticated flag. */
+    async checkSession() {
+        try {
+            const r = await fetch('/api/auth/check');
+            const data = await r.json();
+            if (data.authenticated && data.address) {
+                this.state.address = data.address;
+                this.state.isAuthenticated = true;
+                localStorage.setItem('wallet_state_address', data.address);
+                return true;
+            }
+        } catch(e) {
+            console.error('Session check failed:', e);
+        }
+        this.state.isAuthenticated = false;
+        return false;
+    }
+
+    /**
+     * Smart Merge algorithm that deduplicates local vs backend exchanges array,
+     * resolving conflicts using the latest updatedAt timestamp.
+     */
+    mergeExchanges(local, backend) {
+        const mergedMap = new Map();
+        
+        const getTimestamp = (isoStr) => {
+            if (!isoStr) return 0;
+            const t = Date.parse(isoStr);
+            return isNaN(t) ? 0 : t;
+        };
+
+        // Populate local entries
+        local.forEach(item => {
+            if (!item.id) return;
+            if (!item.updatedAt) {
+                item.updatedAt = new Date(0).toISOString();
+            }
+            mergedMap.set(item.id, item);
+        });
+
+        // Merge backend entries
+        backend.forEach(item => {
+            if (!item.id) return;
+            if (!item.updatedAt) {
+                item.updatedAt = new Date(0).toISOString();
+            }
+
+            if (mergedMap.has(item.id)) {
+                const existing = mergedMap.get(item.id);
+                const localTime = getTimestamp(existing.updatedAt);
+                const backendTime = getTimestamp(item.updatedAt);
+                
+                if (backendTime >= localTime) {
+                    mergedMap.set(item.id, item);
+                }
+            } else {
+                mergedMap.set(item.id, item);
+            }
+        });
+
+        return Array.from(mergedMap.values());
+    }
+
+    /** Fetch exchanges from server and merge them with local storage using Smart Merge. */
+    async syncExchangesWithBackend() {
+        if (!this.state.isAuthenticated) return;
+        try {
+            const r = await fetch('/api/exchanges/active');
+            if (r.ok) {
+                const backendExchanges = await r.json();
+                if (Array.isArray(backendExchanges)) {
+                    const localExchanges = this.state.activeExchanges;
+                    
+                    // Smart merge logic
+                    const merged = this.mergeExchanges(localExchanges, backendExchanges);
+                    
+                    this.state.activeExchanges = merged;
+                    localStorage.setItem('wallet_state_exchanges_v3', JSON.stringify(merged));
+                    
+                    // Dispatch custom event to notify dashboard UI to re-render immediately
+                    const syncEvent = new CustomEvent('exchanges-synced', { detail: merged });
+                    window.dispatchEvent(syncEvent);
+                    
+                    // Upload merged array back to backend if backend was empty or different
+                    const hasBackendDiff = backendExchanges.length !== merged.length ||
+                                           JSON.stringify(backendExchanges) !== JSON.stringify(merged);
+
+                    if (hasBackendDiff) {
+                        await this.syncExchangesToBackend();
+                    }
+
+                    // Connect real-time Server-Sent Events stream
+                    this.initSyncStream();
+                }
+            }
+        } catch (e) {
+            console.error('Failed to sync active exchanges from backend:', e);
+        }
+    }
+
+    /** Debounced push of local activeExchanges array to server. */
+    async syncExchangesToBackend() {
+        if (!this.state.isAuthenticated) return;
+        
+        clearTimeout(this._syncDebounceTimer);
+        return new Promise((resolve, reject) => {
+            this._syncDebounceTimer = setTimeout(async () => {
+                try {
+                    const r = await fetch('/api/exchanges/active', {
+                        method: 'POST',
+                        headers: this._csrfHeaders,
+                        body: JSON.stringify({ activeExchanges: this.state.activeExchanges })
+                    });
+                    if (r.ok) {
+                        resolve(true);
+                    } else {
+                        console.error('Failed to sync exchanges to backend: server returned status', r.status);
+                        reject(new Error(`Server error: ${r.status}`));
+                    }
+                } catch (e) {
+                    console.error('Failed to sync active exchanges to backend:', e);
+                    reject(e);
+                }
+            }, 300); // 300ms debounce window
+        });
+    }
+
+    /** Setup Server-Sent Events (SSE) listener for real-time propagation of updates. */
+    initSyncStream() {
+        if (!this.state.isAuthenticated) return;
+        
+        if (this._syncEventSource) {
+            this._syncEventSource.close();
+            this._syncEventSource = null;
+        }
+
+        console.log('Initializing real-time sync stream...');
+        const sse = new EventSource('/api/exchanges/sync');
+
+        sse.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'update') {
+                    console.log('Received real-time exchange sync update:', data.exchanges);
+                    
+                    // Check if local is actually different to prevent infinite updates / unnecessary DOM refreshes
+                    const localStr = JSON.stringify(this.state.activeExchanges);
+                    const incomingStr = JSON.stringify(data.exchanges);
+                    
+                    if (localStr !== incomingStr) {
+                        this.state.activeExchanges = data.exchanges;
+                        localStorage.setItem('wallet_state_exchanges_v3', incomingStr);
+                        
+                        // Dispatch custom event to notify dashboard UI to re-render
+                        const syncEvent = new CustomEvent('exchanges-synced', { detail: data.exchanges });
+                        window.dispatchEvent(syncEvent);
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to parse sync stream message:', e);
+            }
+        };
+
+        sse.onerror = (err) => {
+            console.warn('Sync stream encountered an error or disconnected. Reconnecting...');
+            sse.close();
+            
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = setTimeout(() => {
+                if (this.state.isAuthenticated) {
+                    this.initSyncStream();
+                }
+            }, 5000); // retry after 5s
+        };
+
+        this._syncEventSource = sse;
     }
 }
 

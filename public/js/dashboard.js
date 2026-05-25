@@ -4,11 +4,11 @@
 class DashboardManager {
     constructor() {
         this.walletsContainer = document.getElementById('wallets-container');
-        this.btnAddExchange   = document.getElementById('btn-add-exchange');
+        this.btnAddExchange = document.getElementById('btn-add-exchange');
         this.modalAddExchange = document.getElementById('modal-add-exchange');
-        this.exchangeSelect   = document.getElementById('exchange-select');
+        this.exchangeSelect = document.getElementById('exchange-select');
         this.extendedConfigGroup = document.getElementById('extended-config-group');
-        this.btnSaveExchange  = document.getElementById('btn-save-exchange');
+        this.btnSaveExchange = document.getElementById('btn-save-exchange');
 
         this.walletData = {};
 
@@ -38,18 +38,18 @@ class DashboardManager {
         const canvas = document.getElementById('particle-canvas');
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
-        let W = canvas.width  = window.innerWidth;
+        let W = canvas.width = window.innerWidth;
         let H = canvas.height = window.innerHeight;
 
         window.addEventListener('resize', () => {
-            W = canvas.width  = window.innerWidth;
+            W = canvas.width = window.innerWidth;
             H = canvas.height = window.innerHeight;
         });
 
         // Reduce count for mobile devices to save battery and CPU
         const isMobile = window.innerWidth < 768;
         const COUNT = isMobile ? 25 : 55;
-        
+
         const particles = Array.from({ length: COUNT }, () => ({
             x: Math.random() * W,
             y: Math.random() * H,
@@ -62,16 +62,16 @@ class DashboardManager {
         const draw = () => {
             ctx.clearRect(0, 0, W, H);
             ctx.fillStyle = 'rgba(255, 72, 54, 0.2)'; // Use a single color for speed
-            
+
             for (const p of particles) {
                 ctx.beginPath();
                 ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
                 ctx.globalAlpha = p.alpha;
                 ctx.fill();
-                
+
                 p.x += p.dx;
                 p.y += p.dy;
-                
+
                 if (p.x < 0 || p.x > W) p.dx *= -1;
                 if (p.y < 0 || p.y > H) p.dy *= -1;
             }
@@ -87,7 +87,7 @@ class DashboardManager {
     initKeyTracking() {
         const key = document.getElementById('draggable-key');
         if (!key) return;
-        
+
         const rotateKey = (cx, cy, x, y) => {
             const angle = Math.atan2(y - cy, x - cx) * (180 / Math.PI);
             key.style.transform = `rotate(${angle}deg)`;
@@ -95,16 +95,16 @@ class DashboardManager {
 
         document.addEventListener('mousemove', (e) => {
             const rect = key.getBoundingClientRect();
-            const cx = rect.left + rect.width  / 2;
-            const cy = rect.top  + rect.height / 2;
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
             rotateKey(cx, cy, e.clientX, e.clientY);
         });
 
         document.addEventListener('touchmove', (e) => {
             if (e.touches[0]) {
                 const rect = key.getBoundingClientRect();
-                const cx = rect.left + rect.width  / 2;
-                const cy = rect.top  + rect.height / 2;
+                const cx = rect.left + rect.width / 2;
+                const cy = rect.top + rect.height / 2;
                 rotateKey(cx, cy, e.touches[0].clientX, e.touches[0].clientY);
             }
         }, { passive: true });
@@ -113,7 +113,12 @@ class DashboardManager {
     async init() {
         this.setupEasterEgg();
         this.setupEventListeners();
-        
+
+        if (!window.walletManager) {
+            console.error("WalletManager is not ready yet!");
+            return;
+        }
+
         // Wait for session check and cross-device exchange synchronization
         if (window.walletManager && typeof window.walletManager.checkSession === 'function') {
             await window.walletManager.checkSession();
@@ -121,7 +126,7 @@ class DashboardManager {
                 await window.walletManager.syncExchangesWithBackend();
             }
         }
-        
+
         const hasExchanges = window.walletManager.state.activeExchanges.length > 0;
         if (hasExchanges) {
             this.renderLoading();
@@ -135,7 +140,7 @@ class DashboardManager {
             if (window.walletManager.state.activeExchanges.length === 0) {
                 this.walletsContainer.innerHTML = `<div class="empty-state"><p>${window.i18n ? window.i18n.t('no_exchange_configured') : 'NO ACTIVE EXCHANGE CONFIGURED. CLICK "ADD_EXCHANGE" TO INITIALIZE.'}</p></div>`;
             } else {
-                const remaining = window.walletManager.state.activeExchanges.map(e => ({...e, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...'}));
+                const remaining = window.walletManager.state.activeExchanges.map(e => ({ ...e, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...' }));
                 this.updateAllWalletCards(remaining);
                 window.refreshEngine.refresh();
             }
@@ -145,7 +150,7 @@ class DashboardManager {
         window.addEventListener('exchanges-synced', (e) => {
             console.log('UI caught exchanges-synced event. Re-rendering...');
             const exchanges = e.detail;
-            
+
             // Map the synced exchanges to their current display states
             const cardsData = exchanges.map(exc => {
                 // If we already have loaded data in memory for this exchange id, keep it
@@ -156,9 +161,9 @@ class DashboardManager {
                     return { ...exc, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...' };
                 }
             });
-            
+
             this.updateAllWalletCards(cardsData);
-            
+
             // Trigger a silent background refresh to load any missing/newly added exchange stats
             window.refreshEngine.refresh();
         });
@@ -190,8 +195,8 @@ class DashboardManager {
         this.exchangeSelect.addEventListener('change', (e) => {
             const v = e.target.value;
             const isVar = v === 'variational';
-            this.extendedConfigGroup.style.display  = (v === 'extended') ? 'block' : 'none';
-            document.getElementById('variational-config-group').style.display = isVar  ? 'block' : 'none';
+            this.extendedConfigGroup.style.display = (v === 'extended') ? 'block' : 'none';
+            document.getElementById('variational-config-group').style.display = isVar ? 'block' : 'none';
             document.getElementById('multi-wallet-group').style.display = (v && !isVar) ? 'block' : 'none';
             document.getElementById('label-group').style.display = v ? 'block' : 'none';
         });
@@ -216,7 +221,7 @@ class DashboardManager {
 
         // ── Real-time address validation ───────────────────────────────────
         const addrInputEl = document.getElementById('wallet-address-input');
-        const validMsg    = document.getElementById('wallet-addr-validation');
+        const validMsg = document.getElementById('wallet-addr-validation');
         if (addrInputEl && validMsg) {
             addrInputEl.addEventListener('input', () => {
                 const v = addrInputEl.value.trim();
@@ -235,19 +240,19 @@ class DashboardManager {
                 return;
             }
             const labelInput = document.getElementById('wallet-label-input');
-            const label      = labelInput?.value.trim();
+            const label = labelInput?.value.trim();
 
             // ── Variational manual path ────────────────────────────────────
             if (exc === 'variational') {
                 const walletAddress = document.getElementById('var-wallet-address').value.trim();
                 const manualData = {
                     initDeposit: parseFloat(document.getElementById('var-init-deposit').value) || 0,
-                    actDeposit:  parseFloat(document.getElementById('var-act-deposit').value)  || 0,
-                    volume:      parseFloat(document.getElementById('var-volume').value)        || 0,
-                    points:      parseFloat(document.getElementById('var-points').value)        || 0,
-                    rank:        document.getElementById('var-rank').value.trim() || null,
-                    winRate:     parseFloat(document.getElementById('var-win-rate').value) || 0,
-                    roi:         parseFloat(document.getElementById('var-roi').value) || 0
+                    actDeposit: parseFloat(document.getElementById('var-act-deposit').value) || 0,
+                    volume: parseFloat(document.getElementById('var-volume').value) || 0,
+                    points: parseFloat(document.getElementById('var-points').value) || 0,
+                    rank: document.getElementById('var-rank').value.trim() || null,
+                    winRate: parseFloat(document.getElementById('var-win-rate').value) || 0,
+                    roi: parseFloat(document.getElementById('var-roi').value) || 0
                 };
                 const result = await window.walletManager.addVariationalManual(manualData, walletAddress, label).catch(e => ({ success: false, error: e.message }));
                 if (!result || !result.success) {
@@ -257,7 +262,7 @@ class DashboardManager {
                     else alert(errMsg);
                     return;
                 }
-                ['var-wallet-address','var-init-deposit','var-act-deposit','var-volume','var-points','var-rank','var-win-rate','var-roi'].forEach(fid => {
+                ['var-wallet-address', 'var-init-deposit', 'var-act-deposit', 'var-volume', 'var-points', 'var-rank', 'var-win-rate', 'var-roi'].forEach(fid => {
                     const el = document.getElementById(fid); if (el) el.value = '';
                 });
                 if (labelInput) labelInput.value = '';
@@ -270,7 +275,7 @@ class DashboardManager {
             }
 
             // ── Standard path (Extended / Nado) ───────────────────────────
-            const addrInput  = document.getElementById('wallet-address-input');
+            const addrInput = document.getElementById('wallet-address-input');
             const walletAddr = addrInput?.value.trim();
 
             // ── Validate address ───────────────────────────────────────────
@@ -285,8 +290,8 @@ class DashboardManager {
 
             // ── Duplicate check (case-insensitive) ────────────────────────
             const sessionAddr = (window.walletManager.state.address || '').toLowerCase();
-            const inputAddr   = (walletAddr || '').toLowerCase();
-            const finalAddr   = inputAddr || sessionAddr;
+            const inputAddr = (walletAddr || '').toLowerCase();
+            const finalAddr = inputAddr || sessionAddr;
 
             if (!finalAddr) {
                 addrInput.classList.add('input-error');
@@ -339,11 +344,11 @@ class DashboardManager {
 
             this.modalAddExchange.style.display = 'none';
             if (walletAddr) this.saveWalletAddressHistory(walletAddr);
-            
+
             // Re-render UI to include the new card (in loading state)
-            const remaining = window.walletManager.state.activeExchanges.map(e => ({...e, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...'}));
+            const remaining = window.walletManager.state.activeExchanges.map(e => ({ ...e, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...' }));
             this.updateAllWalletCards(remaining);
-            
+
             window.refreshEngine.refresh();
         });
 
@@ -379,7 +384,7 @@ class DashboardManager {
         if (!datalist) return;
         datalist.innerHTML = '';
         let history = [];
-        try { history = JSON.parse(localStorage.getItem('wallet_history') || '[]'); } catch(e) {}
+        try { history = JSON.parse(localStorage.getItem('wallet_history') || '[]'); } catch (e) { }
         history.forEach(addr => {
             const option = document.createElement('option');
             option.value = addr;
@@ -392,11 +397,11 @@ class DashboardManager {
     // Підказка: що буде, якщо поєднати КЛЮЧ і СУНДУК? 🔑
     // ═══════════════════════════════════════════════════════════════════════
     setupEasterEgg() {
-        const key    = document.getElementById('draggable-key');
-        const chest  = document.getElementById('treasure-chest');
-        const modal  = document.getElementById('easter-egg-modal');
+        const key = document.getElementById('draggable-key');
+        const chest = document.getElementById('treasure-chest');
+        const modal = document.getElementById('easter-egg-modal');
         const fortunePopup = document.getElementById('fortune-popup');
-        const fortuneText  = document.getElementById('fortune-text');
+        const fortuneText = document.getElementById('fortune-text');
         if (!key || !chest) return;
 
         chest.addEventListener('click', () => {
@@ -411,7 +416,7 @@ class DashboardManager {
             ];
 
             const quote = fortunes[Math.floor(Math.random() * fortunes.length)];
-            const hint  = hints[Math.floor(Math.random() * hints.length)];
+            const hint = hints[Math.floor(Math.random() * hints.length)];
             const hintEl = fortunePopup.querySelector('.fortune-hint');
             if (hintEl) hintEl.textContent = hint;
             fortuneText.textContent = `"${quote}"`;
@@ -430,7 +435,7 @@ class DashboardManager {
         chest.addEventListener('drop', (e) => {
             e.preventDefault();
             if (e.dataTransfer.getData('text/plain') === 'key') {
-                confetti({ particleCount: 200, spread: 90, origin: { y: 0.5 }, colors: ['#FF4836','#FFD700','#FFFFFF'] });
+                confetti({ particleCount: 200, spread: 90, origin: { y: 0.5 }, colors: ['#FF4836', '#FFD700', '#FFFFFF'] });
                 modal.style.display = 'flex';
             }
         });
@@ -443,15 +448,15 @@ class DashboardManager {
             const touch = e.touches[0];
             startX = touch.clientX;
             startY = touch.clientY;
-            
+
             const rect = key.getBoundingClientRect();
             initialX = rect.left;
             initialY = rect.top;
-            
+
             // Lock dimensions
             key.style.width = rect.width + 'px';
             key.style.height = rect.height + 'px';
-            
+
             key.style.position = 'fixed';
             key.style.zIndex = '9999';
             key.style.left = initialX + 'px';
@@ -472,14 +477,14 @@ class DashboardManager {
             e.preventDefault();
             const touch = e.changedTouches[0];
             const chestRect = chest.getBoundingClientRect();
-            
+
             // Check if drop location overlaps chest
             if (touch.clientX >= chestRect.left && touch.clientX <= chestRect.right &&
                 touch.clientY >= chestRect.top && touch.clientY <= chestRect.bottom) {
-                confetti({ particleCount: 200, spread: 90, origin: { y: 0.5 }, colors: ['#FF4836','#FFD700','#FFFFFF'] });
+                confetti({ particleCount: 200, spread: 90, origin: { y: 0.5 }, colors: ['#FF4836', '#FFD700', '#FFFFFF'] });
                 modal.style.display = 'flex';
             }
-            
+
             // Reset key position
             key.style.position = '';
             key.style.zIndex = '';
@@ -556,7 +561,7 @@ class DashboardManager {
         const card = document.createElement('div');
         card.className = 'wallet-card';
         card.dataset.id = id;
-        const excName   = this.escapeHtml(exchange.charAt(0).toUpperCase() + exchange.slice(1));
+        const excName = this.escapeHtml(exchange.charAt(0).toUpperCase() + exchange.slice(1));
         let displayAddr = walletAddress || '';
         // Detect manual Variational entry by presence of manualData in the source entry
         const sourceEntry = window.walletManager.state.activeExchanges.find(e => e.id === id);
@@ -566,17 +571,17 @@ class DashboardManager {
         const addrShort = window.Utils.truncateAddress(displayAddr);
 
         let logoUrl = '';
-        if (exchange === 'nado')     logoUrl = 'assets/nado.png';
+        if (exchange === 'nado') logoUrl = 'assets/nado.png';
         else if (exchange === 'extended') logoUrl = 'assets/Extended.png';
         else if (exchange === 'variational') logoUrl = 'assets/Variational.png';
 
-        const logoHtml  = logoUrl
+        const logoHtml = logoUrl
             ? `<img src="${logoUrl}" style="width:16px;height:16px;object-fit:contain;flex-shrink:0;">`
             : `<div style="width:16px;height:16px;flex-shrink:0;"></div>`;
         // Sanitize label to prevent HTML injection
         const safeLabel = this.escapeHtml(label);
         const labelHtml = safeLabel ? `<span class="card-label">${safeLabel}</span>` : '';
-        const addrRow   = addrShort ? `<span class="wallet-address-truncated">ID: ${addrShort}</span>` : '';
+        const addrRow = addrShort ? `<span class="wallet-address-truncated">ID: ${addrShort}</span>` : '';
 
         const headerHtml = (editBtnArg = '') => `
             <div class="card-header">
@@ -600,7 +605,7 @@ class DashboardManager {
             return card;
         }
 
-        const data     = this.walletData[id] || {};
+        const data = this.walletData[id] || {};
         const pnlClass = (data.pnl || 0) >= 0 ? 'positive' : 'negative';
 
         // ── $/POINT metric ─────────────────────────────────────────────────
@@ -658,7 +663,7 @@ class DashboardManager {
 
     patchCard(existingCard, res) {
         const { id, exchange, success, error } = res;
-        
+
         // If success status changed (success vs error), just re-render card content to avoid complex structure transition logic
         const wasSuccess = existingCard.querySelector('.wallet-stats-grid') !== null;
         if (wasSuccess !== success) {
@@ -726,7 +731,7 @@ class DashboardManager {
         updateText('.val-volume', window.Utils.formatCurrency(data.volume));
         updateText('.val-points', (data.points || 0).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
         updateText('.val-rank', data.rank ? data.rank : 'N/A');
-        
+
         // PNL update with class
         const pnlEl = existingCard.querySelector('.val-pnl');
         if (pnlEl) {
@@ -738,7 +743,7 @@ class DashboardManager {
         }
 
         updateText('.val-win-rate', window.Utils.formatPercent(data.winRate));
-        
+
         // ROI update with class
         const roiEl = existingCard.querySelector('.val-roi');
         if (roiEl) {
@@ -766,7 +771,7 @@ class DashboardManager {
         window.walletManager.removeExchange(id);
         delete this.walletData[id];
         // Re-render only current active exchanges — do NOT show removed ones
-        const remaining = window.walletManager.state.activeExchanges.map(e => ({...e, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...'}));
+        const remaining = window.walletManager.state.activeExchanges.map(e => ({ ...e, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...' }));
         this.updateAllWalletCards(remaining);
         window.refreshEngine.refresh();
     }
@@ -776,15 +781,15 @@ class DashboardManager {
         const entry = window.walletManager.state.activeExchanges.find(e => e.id === id);
         if (!entry || entry.exchange !== 'variational') return;
         const md = entry.manualData || {};
-        document.getElementById('edit-var-id').value           = id;
+        document.getElementById('edit-var-id').value = id;
         document.getElementById('edit-var-wallet-address').value = entry.walletAddress || '';
         document.getElementById('edit-var-init-deposit').value = md.initDeposit || '';
-        document.getElementById('edit-var-act-deposit').value  = md.actDeposit  || '';
-        document.getElementById('edit-var-volume').value       = md.volume      || '';
-        document.getElementById('edit-var-points').value       = md.points      || '';
-        document.getElementById('edit-var-rank').value         = md.rank        || '';
-        document.getElementById('edit-var-win-rate').value     = md.winRate     || '';
-        document.getElementById('edit-var-roi').value          = md.roi         || '';
+        document.getElementById('edit-var-act-deposit').value = md.actDeposit || '';
+        document.getElementById('edit-var-volume').value = md.volume || '';
+        document.getElementById('edit-var-points').value = md.points || '';
+        document.getElementById('edit-var-rank').value = md.rank || '';
+        document.getElementById('edit-var-win-rate').value = md.winRate || '';
+        document.getElementById('edit-var-roi').value = md.roi || '';
         document.getElementById('modal-edit-variational').style.display = 'flex';
     }
 
@@ -794,12 +799,12 @@ class DashboardManager {
         const walletAddress = document.getElementById('edit-var-wallet-address').value.trim();
         const manualData = {
             initDeposit: parseFloat(document.getElementById('edit-var-init-deposit').value) || 0,
-            actDeposit:  parseFloat(document.getElementById('edit-var-act-deposit').value)  || 0,
-            volume:      parseFloat(document.getElementById('edit-var-volume').value)        || 0,
-            points:      parseFloat(document.getElementById('edit-var-points').value)        || 0,
-            rank:        document.getElementById('edit-var-rank').value.trim() || null,
-            winRate:     parseFloat(document.getElementById('edit-var-win-rate').value) || 0,
-            roi:         parseFloat(document.getElementById('edit-var-roi').value) || 0
+            actDeposit: parseFloat(document.getElementById('edit-var-act-deposit').value) || 0,
+            volume: parseFloat(document.getElementById('edit-var-volume').value) || 0,
+            points: parseFloat(document.getElementById('edit-var-points').value) || 0,
+            rank: document.getElementById('edit-var-rank').value.trim() || null,
+            winRate: parseFloat(document.getElementById('edit-var-win-rate').value) || 0,
+            roi: parseFloat(document.getElementById('edit-var-roi').value) || 0
         };
         window.walletManager.updateVariationalManual(id, manualData, walletAddress);
         document.getElementById('modal-edit-variational').style.display = 'none';
@@ -809,15 +814,15 @@ class DashboardManager {
     processExchangeData(exchange, rawData) {
         const d = { initDeposit: 0, actDeposit: 0, volume: 0, points: 0, pnl: 0, winRate: 0 };
         d.initDeposit = rawData.init_deposit || 0;
-        d.actDeposit  = rawData.act_deposit  || 0;
-        d.volume      = rawData.total_volume || 0;
-        d.winRate     = rawData.win_rate     || 0;
-        d.rank        = rawData.rank;
+        d.actDeposit = rawData.act_deposit || 0;
+        d.volume = rawData.total_volume || 0;
+        d.winRate = rawData.win_rate || 0;
+        d.rank = rawData.rank;
         if (rawData.native_pnl !== undefined) {
             d.native_pnl = rawData.native_pnl;
         }
         // PNL = ACT_DEPOSIT - INIT_DEPOSIT (universal formula for all exchanges)
-        d.pnl         = d.actDeposit - d.initDeposit;
+        d.pnl = d.actDeposit - d.initDeposit;
 
         if (exchange === 'nado') {
             const ptsVal = rawData.points?.points || rawData.points || 0;
@@ -866,41 +871,41 @@ class DashboardManager {
 
             card.setAttribute('draggable', true);
             card.style.cursor = 'grab';
-            
-            card.addEventListener('dragstart', function(e) {
+
+            card.addEventListener('dragstart', function (e) {
                 draggedItem = this;
                 this.style.cursor = 'grabbing';
                 setTimeout(() => this.style.opacity = '0.5', 0);
             });
-            
-            card.addEventListener('dragend', function() {
+
+            card.addEventListener('dragend', function () {
                 setTimeout(() => {
                     this.style.opacity = '1';
                     this.style.cursor = 'grab';
                     draggedItem = null;
                 }, 0);
             });
-            
-            card.addEventListener('dragover', function(e) {
+
+            card.addEventListener('dragover', function (e) {
                 e.preventDefault();
             });
-            
-            card.addEventListener('dragenter', function(e) {
+
+            card.addEventListener('dragenter', function (e) {
                 e.preventDefault();
                 if (draggedItem !== this) this.style.transform = 'scale(1.02)';
             });
-            
-            card.addEventListener('dragleave', function() {
+
+            card.addEventListener('dragleave', function () {
                 if (draggedItem !== this) this.style.transform = 'none';
             });
-            
-            card.addEventListener('drop', function() {
+
+            card.addEventListener('drop', function () {
                 this.style.transform = 'none';
                 if (draggedItem && draggedItem !== this) {
                     const allCards = [...container.querySelectorAll('.wallet-card')];
                     const draggedIdx = allCards.indexOf(draggedItem);
                     const thisIdx = allCards.indexOf(this);
-                    
+
                     if (draggedIdx < thisIdx) {
                         this.parentNode.insertBefore(draggedItem, this.nextSibling);
                     } else {
@@ -915,13 +920,13 @@ class DashboardManager {
     saveCardOrder() {
         const cards = this.walletsContainer.querySelectorAll('.wallet-card');
         const newOrderIds = Array.from(cards).map(card => card.dataset.id);
-        
+
         const newExchanges = [];
         newOrderIds.forEach(id => {
             const entry = window.walletManager.state.activeExchanges.find(e => e.id === id);
             if (entry) newExchanges.push(entry);
         });
-        
+
         if (newExchanges.length === window.walletManager.state.activeExchanges.length) {
             // Set new updatedAt timestamp for reordered active exchanges so they propagate as newer
             newExchanges.forEach(exc => exc.updatedAt = new Date().toISOString());
@@ -935,9 +940,9 @@ class DashboardManager {
         let totalPoints = 0;
 
         Object.values(this.walletData).forEach(d => {
-            totalInit  += d.initDeposit;
-            totalPnL   += d.pnl;  // pnl = actDeposit - initDeposit per card
-            totalVol   += d.volume;
+            totalInit += d.initDeposit;
+            totalPnL += d.pnl;  // pnl = actDeposit - initDeposit per card
+            totalVol += d.volume;
             if (d.points > 0) totalPoints += d.points;
             if (typeof d.winRate === 'number' && !isNaN(d.winRate) && d.winRate > 0) {
                 totalWinRate += d.winRate; winRateCount++;
@@ -947,11 +952,11 @@ class DashboardManager {
 
         const totalROI = totalInit > 0 ? (totalPnL / totalInit) * 100 : 0;
 
-        document.getElementById('total-deposit').textContent  = window.Utils.formatCurrency(totalInit);
-        document.getElementById('total-pnl').textContent      = window.Utils.formatCurrency(totalPnL);
-        document.getElementById('total-roi').textContent      = window.Utils.formatPercent(totalROI);
+        document.getElementById('total-deposit').textContent = window.Utils.formatCurrency(totalInit);
+        document.getElementById('total-pnl').textContent = window.Utils.formatCurrency(totalPnL);
+        document.getElementById('total-roi').textContent = window.Utils.formatPercent(totalROI);
         document.getElementById('total-win-rate').textContent = window.Utils.formatPercent(meanWinRate);
-        document.getElementById('total-volume').textContent   = window.Utils.formatCurrency(totalVol);
+        document.getElementById('total-volume').textContent = window.Utils.formatCurrency(totalVol);
 
         const roiEl = document.getElementById('total-roi');
         if (roiEl) {

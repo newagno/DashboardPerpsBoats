@@ -158,15 +158,19 @@ class WalletManager {
      * @param {string|null} walletAddress - specific wallet address (null = use session address)
      * @param {string|null} label - display label
      */
-    addExchange(exchange, walletAddress = null, label = null) {
+    async addExchange(exchange, walletAddress = null, label = null) {
         if (!this.state.isAuthenticated) {
-            alert(window.i18n ? window.i18n.t('please_login_first') : 'Please login (sign the message) first to add or sync exchanges.');
-            return { success: false, error: 'Not authenticated' };
+            if (this.state.address) {
+                try { await this.loginToBackend(); } catch(e) { return { success: false, error: 'Login cancelled' }; }
+            } else {
+                await this.connectMetaMask();
+                try { await this.loginToBackend(); } catch(e) { return { success: false, error: 'Login cancelled' }; }
+            }
         }
         const addr = (walletAddress || this.state.address || '').toLowerCase();
         
         const entry = {
-            id: crypto.randomUUID(), // collision-proof
+            id: crypto.randomUUID(),
             exchange,
             walletAddress: addr || null,
             label: label || (exchange.charAt(0).toUpperCase() + exchange.slice(1)),
@@ -183,10 +187,14 @@ class WalletManager {
      * @param {string|null} walletAddress - specific wallet address
      * @param {string|null} label - display label
      */
-    addVariationalManual(manualData, walletAddress = null, label = null) {
+    async addVariationalManual(manualData, walletAddress = null, label = null) {
         if (!this.state.isAuthenticated) {
-            alert(window.i18n ? window.i18n.t('please_login_first') : 'Please login (sign the message) first to add or sync exchanges.');
-            return { success: false, error: 'Not authenticated' };
+            if (this.state.address) {
+                try { await this.loginToBackend(); } catch(e) { return { success: false, error: 'Login cancelled' }; }
+            } else {
+                await this.connectMetaMask();
+                try { await this.loginToBackend(); } catch(e) { return { success: false, error: 'Login cancelled' }; }
+            }
         }
         const entry = {
             id: crypto.randomUUID(), // collision-proof
@@ -207,10 +215,14 @@ class WalletManager {
      * @param {object} manualData - { initDeposit, actDeposit, volume, points, rank }
      * @param {string|null} walletAddress - specific wallet address
      */
-    updateVariationalManual(id, manualData, walletAddress = null) {
+    async updateVariationalManual(id, manualData, walletAddress = null) {
         if (!this.state.isAuthenticated) {
-            alert(window.i18n ? window.i18n.t('please_login_first') : 'Please login (sign the message) first to update or sync exchanges.');
-            return false;
+            if (this.state.address) {
+                try { await this.loginToBackend(); } catch(e) { return false; }
+            } else {
+                await this.connectMetaMask();
+                try { await this.loginToBackend(); } catch(e) { return false; }
+            }
         }
         const entry = this.state.activeExchanges.find(e => e.id === id);
         if (!entry || entry.exchange !== 'variational') return false;
@@ -224,10 +236,14 @@ class WalletManager {
     /**
      * Remove wallet entry by its unique id.
      */
-    removeExchange(id) {
+    async removeExchange(id) {
         if (!this.state.isAuthenticated) {
-            alert(window.i18n ? window.i18n.t('please_login_first') : 'Please login (sign the message) first to remove exchanges.');
-            return;
+            if (this.state.address) {
+                try { await this.loginToBackend(); } catch(e) { return; }
+            } else {
+                await this.connectMetaMask();
+                try { await this.loginToBackend(); } catch(e) { return; }
+            }
         }
         const entry = this.state.activeExchanges.find(e => e.id === id);
         this.state.activeExchanges = this.state.activeExchanges.filter(e => e.id !== id);

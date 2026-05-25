@@ -168,16 +168,22 @@ class DashboardManager {
 
     setupEventListeners() {
         this.btnAddExchange.addEventListener('click', () => {
+            // If walletManager isn't ready yet, wait a moment before proceeding
             // Reset modal fields before showing
             this.exchangeSelect.value = '';
             const addrInput = document.getElementById('wallet-address-input');
             const labelInput = document.getElementById('wallet-label-input');
-            if (addrInput) addrInput.value = '';
+            if (addrInput) {
+                addrInput.value = '';
+                // Pre-fill with connected wallet address if available
+                if (window.walletManager && window.walletManager.state.address) {
+                    addrInput.value = window.walletManager.state.address;
+                }
+            }
             if (labelInput) labelInput.value = '';
             this.extendedConfigGroup.style.display = 'none';
             document.getElementById('multi-wallet-group').style.display = 'none';
             document.getElementById('label-group').style.display = 'none';
-            
             this.modalAddExchange.style.display = 'flex';
         });
 
@@ -223,6 +229,11 @@ class DashboardManager {
         this.btnSaveExchange.addEventListener('click', async () => {
             const exc = this.exchangeSelect.value;
             if (!exc) return;
+            if (!window.walletManager) {
+                console.error('WalletManager not yet initialized');
+                alert('Please wait a moment and try again.');
+                return;
+            }
             const labelInput = document.getElementById('wallet-label-input');
             const label      = labelInput?.value.trim();
 
@@ -238,7 +249,8 @@ class DashboardManager {
                     winRate:     parseFloat(document.getElementById('var-win-rate').value) || 0,
                     roi:         parseFloat(document.getElementById('var-roi').value) || 0
                 };
-                window.walletManager.addVariationalManual(manualData, walletAddress, label);
+                const result = await window.walletManager.addVariationalManual(manualData, walletAddress, label);
+                if (!result || !result.success) return; // login was cancelled
                 ['var-wallet-address','var-init-deposit','var-act-deposit','var-volume','var-points','var-rank','var-win-rate','var-roi'].forEach(fid => {
                     const el = document.getElementById(fid); if (el) el.value = '';
                 });
@@ -290,7 +302,8 @@ class DashboardManager {
                 return;
             }
 
-            const result = window.walletManager.addExchange(exc, walletAddr, label);
+            const result = await window.walletManager.addExchange(exc, walletAddr, label);
+            if (!result || !result.success) return; // login was cancelled
             if (exc === 'extended') {
                 const pkInput = document.getElementById('extended-api-key');
                 const pk = pkInput.value.trim();

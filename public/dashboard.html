@@ -256,15 +256,16 @@
         <div class="spinner"></div>
         <p>SYNCHRONIZING / SYSTEM_CORE...</p>
     </div>
-
-    <!-- Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js" defer></script>
+    <!-- Scripts — ORDER MATTERS -->
+    <!-- 1. ethers must load before AppKit and walletManager -->
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <!-- 2. AppKit (module, depends on ethers being global) -->
     <script type="module">
         import { createAppKit } from 'https://esm.run/@reown/appkit'
         import { EthersAdapter } from 'https://esm.run/@reown/appkit-adapter-ethers'
         import { mainnet, arbitrum } from 'https://esm.run/@reown/appkit/networks'
 
-        const projectId = '8e391307b22a0129f957df38fc05167a' // Public placeholder
+        const projectId = '8e391307b22a0129f957df38fc05167a'
 
         const metadata = {
             name: 'TradeDash',
@@ -278,14 +279,16 @@
             networks: [mainnet, arbitrum],
             metadata,
             projectId,
-            features: {
-                analytics: true
-            }
+            features: { analytics: true }
         })
 
         window.appKit = appKit;
+        // Signal that AppKit is ready
+        window.dispatchEvent(new Event('appkit-ready'));
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js" defer></script>
+    <!-- 3. canvas-confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js" defer></script>
+    <!-- 4. Local scripts — defer ensures they run after DOM is ready -->
     <script src="js/i18n.js" defer></script>
     <script src="js/walletManager.js" defer></script>
     <script src="js/exchanges.js" defer></script>

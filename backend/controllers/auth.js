@@ -127,7 +127,7 @@ const verifySig = async (req, res) => {
         res.cookie('tradedash_auth', sessionId, {
             httpOnly: true,
             secure: isProd,   // true for HTTPS
-            sameSite: isProd ? 'strict' : 'lax',
+            sameSite: 'lax',
             maxAge: 24 * 60 * 60 * 1000, // 24 hours
             path: '/'
         });

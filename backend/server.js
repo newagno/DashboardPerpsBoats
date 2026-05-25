@@ -32,6 +32,33 @@ if (process.env.REDIS_URL) {
 
 const EventEmitter = require('events');
 const localSyncEmitter = new EventEmitter();
+localSyncEmitter.setMaxListeners(200); // Prevent MaxListeners warning for many concurrent SSE clients
+
+// ── Global Redis Subscriber (single shared connection, routes to per-client emitters) ─
+// This prevents connection exhaustion: one subscriber per process, not per SSE client.
+let globalRedisSub = null;
+if (process.env.REDIS_URL) {
+    const Redis = require('ioredis');
+    globalRedisSub = new Redis(process.env.REDIS_URL, {
+        maxRetriesPerRequest: null,
+        connectTimeout: 5000,
+        lazyConnect: true
+    });
+    globalRedisSub.connect()
+        .then(() => globalRedisSub.psubscribe('user:exchanges:*'))
+        .catch(err => logger.error('Global Redis subscriber failed:', err.message));
+
+    globalRedisSub.on('pmessage', (_pattern, channel, message) => {
+        // Route to the matching localSyncEmitter channel
+        const address = channel.replace('user:exchanges:', '');
+        try {
+            const exchanges = JSON.parse(message);
+            localSyncEmitter.emit('sync:' + address, exchanges);
+        } catch (e) {
+            logger.error('Failed to parse Redis pmessage:', e);
+        }
+    });
+}
 
 // Axios instance with global timeout (reduced for Vercel)
 const http = axios.create({ timeout: isProd ? 9000 : 60000 });
@@ -59,19 +86,21 @@ app.use(helmet({
 // ── CORS (environment-aware) ────────────────────────────────────────────────
 app.use(cors({
     origin: (origin, callback) => {
-        const allowedOrigins = isProd
-            ? [
-                'https://dashboard-perps.vercel.app',
-                'https://dashboard-perps-aiunch7i4-newagnos-projects-d51e8127.vercel.app'
-              ]
-            : [
-                'http://localhost:3000', 'http://127.0.0.1:3000',
-                'http://localhost:5000', 'http://127.0.0.1:5000',
-                'https://tradedash-local.com',
-                'https://dashboard-perps.vercel.app',
-                'https://dashboard-perps-aiunch7i4-newagnos-projects-d51e8127.vercel.app'
-              ];
-        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+        // In production (Vercel): only allow exact known domains
+        const prodOrigins = [
+            'https://dashboard-perps.vercel.app'
+        ];
+        // In development: also allow localhost
+        const devOrigins = [
+            'http://localhost:3000', 'http://127.0.0.1:3000',
+            'http://localhost:5000', 'http://127.0.0.1:5000'
+        ];
+        const allowedOrigins = isProd ? prodOrigins : [...prodOrigins, ...devOrigins];
+
+        // Allow server-to-server requests (no Origin header)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
             logger.warn(`CORS blocked origin: ${origin}`);
@@ -156,36 +185,8 @@ app.get('/api/exchanges/sync', authController.requireAuth, (req, res) => {
         res.write(`data: ${JSON.stringify({ type: 'update', exchanges })}\n\n`);
     };
 
-    // Listen to local memory updates
+    // Single global subscriber routes messages via localSyncEmitter (no per-client Redis connection)
     localSyncEmitter.on('sync:' + address, onUpdate);
-
-    // Dedicated Redis subscriber connection for this SSE client session
-    let redisSub = null;
-    const redisChannel = `user:exchanges:${address}`;
-
-    if (process.env.REDIS_URL) {
-        const Redis = require('ioredis');
-        redisSub = new Redis(process.env.REDIS_URL, {
-            maxRetriesPerRequest: 3,
-            connectTimeout: 5000,
-            lazyConnect: true
-        });
-        
-        redisSub.connect()
-            .then(() => redisSub.subscribe(redisChannel))
-            .catch(err => logger.error(`Redis SSE subscriber failed for ${address}:`, err.message));
-
-        redisSub.on('message', (channel, message) => {
-            if (channel === redisChannel) {
-                try {
-                    const exchanges = JSON.parse(message);
-                    onUpdate(exchanges);
-                } catch (e) {
-                    logger.error('Failed to parse Redis Pub/Sub sync event payload:', e);
-                }
-            }
-        });
-    }
 
     // Periodical heartbeats to maintain active connection and prevent timeouts
     const heartbeat = setInterval(() => {
@@ -195,9 +196,6 @@ app.get('/api/exchanges/sync', authController.requireAuth, (req, res) => {
     req.on('close', () => {
         clearInterval(heartbeat);
         localSyncEmitter.removeListener('sync:' + address, onUpdate);
-        if (redisSub) {
-            redisSub.quit().catch(() => {});
-        }
     });
 });
 
@@ -251,8 +249,8 @@ app.post('/api/exchanges/keys/store', csrfProtect, validate(schemas.storeKeySche
     res.cookie(cookieName, value, {
         httpOnly: true,
         secure: isProd,
-        sameSite: isProd ? 'strict' : 'lax',
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000,
         path: '/'
     });
 
@@ -296,91 +294,63 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
 
         const BASE = 'https://api.starknet.extended.exchange/api/v1';
 
-        // Paginated fetch helper - optimized for Serverless (time-budgeted)
-        const fetchStartTime = Date.now();
-        const fetchAllPaginated = async (endpoint) => {
-            let all = [];
-            const seen = new Set();
-            let cursor = null;
-            const maxTime = isProd ? 7000 : 55000;
-            for (let i = 0; i < 100; i++) {
-                if (Date.now() - fetchStartTime > maxTime) {
-                    errors.push(`${endpoint}: time budget exceeded after ${all.length} records`);
-                    break;
-                }
-                try {
-                    let url = `${BASE}${endpoint}${endpoint.includes('?') ? '&' : '?'}limit=10000`;
-                    if (cursor) url += `&cursor=${cursor}`;
-                    const r = await http.get(url, { headers });
-                    const records = r.data?.data || [];
-                    let added = 0;
-                    for (const rec of (Array.isArray(records) ? records : [])) {
-                        const id = rec.id || JSON.stringify(rec);
-                        if (!seen.has(id)) { seen.add(id); all.push(rec); added++; }
-                    }
-                    const next = r.data?.pagination?.cursor;
-                    if (added === 0 || !next) break;
-                    cursor = next;
-                } catch (e) { errors.push(`${endpoint}: ${e.message}`); logger.error(`Extended pagination error [${endpoint}]:`, e.message); break; }
-            }
-            return all;
+        // Load incremental stats from cache
+        const cacheKey = `cache:extended:${entryId}`;
+        const cached = await store.get(cacheKey) || {
+            trades: [],
+            deposits: [],
+            withdrawals: [],
+            positions: [],
+            orders: [],
+            lastSync: 0
         };
 
-        // Fetch all endpoints in parallel
-        const [balanceRes, tradesRes, pointsRes, depositsRes, withdrawalsRes, leaderboardRes, positionsRes, ordersHistRes, pnlChartRes] = await Promise.all([
+        // Determine if sync is required (older than 5 minutes or never synced)
+        const requiresSync = !cached.lastSync || (Date.now() - cached.lastSync > 5 * 60 * 1000);
+
+        // Fetch only current balances, earned rewards, leaderboard and PnL charts fresh (Non-paginated fast requests)
+        const [balanceRes, pointsRes, leaderboardRes, pnlChartRes] = await Promise.all([
             http.get(`${BASE}/user/balance`, { headers })
                 .catch(e => { errors.push(`balance: ${e.message}`); logger.error('Extended balance error:', e.message); return { data: {} }; }),
-            fetchAllPaginated('/user/trades')
-                .catch(e => { errors.push(`trades: ${e.message}`); logger.error('Extended trades error:', e.message); return []; }),
             http.get(`${BASE}/user/rewards/earned`, { headers })
                 .catch(e => { errors.push(`points: ${e.message}`); logger.error('Extended points error:', e.message); return { data: { data: [] } }; }),
-            fetchAllPaginated('/user/assetOperations?type=DEPOSIT&status=COMPLETED')
-                .catch(e => { errors.push(`ops_dep: ${e.message}`); logger.error('Extended deps error:', e.message); return []; }),
-            fetchAllPaginated('/user/assetOperations?type=WITHDRAWAL&status=COMPLETED')
-                .catch(e => { errors.push(`ops_with: ${e.message}`); logger.error('Extended with error:', e.message); return []; }),
             http.get(`${BASE}/user/rewards/leaderboard/stats`, { headers })
                 .catch(e => { errors.push(`leaderboard: ${e.message}`); logger.error('Extended leaderboard error:', e.message); return { data: { data: {} } }; }),
-            fetchAllPaginated('/user/positions/history')
-                .catch(e => { errors.push(`positions: ${e.message}`); logger.error('Extended positions error:', e.message); return []; }),
-            // Also fetch filled orders history — trades endpoint may miss some fills
-            fetchAllPaginated('/user/orders/history')
-                .catch(e => { errors.push(`orders: ${e.message}`); logger.error('Extended orders hist error:', e.message); return []; }),
             http.get(`${BASE}/portfolio/charts/pnl?interval=ALL&pnlType=TOTAL_PNL`, { headers })
                 .catch(e => { errors.push(`pnlChart: ${e.message}`); logger.error('Extended pnlChart error:', e.message); return { data: { data: [] } }; })
         ]);
 
-        // INIT_DEPOSIT = sum(DEPOSIT amounts) - sum(WITHDRAWAL amounts)
+        // Calculate INIT_DEPOSIT from cached historical deposits and withdrawals
         let totalIn = 0, totalOut = 0;
-        for (const op of depositsRes) {
+        const cachedDeposits = cached.deposits || [];
+        const cachedWithdrawals = cached.withdrawals || [];
+        for (const op of cachedDeposits) {
             totalIn += Math.abs(parseFloat(op.amount || 0));
         }
-        for (const op of withdrawalsRes) {
+        for (const op of cachedWithdrawals) {
             totalOut += Math.abs(parseFloat(op.amount || 0));
         }
         const initDeposit = totalIn - totalOut;
 
-        // ACT_DEPOSIT
-        // Prioritize equity (total account value including unrealized PnL) over balance (settled/realized only)
+        // Fresh ACT_DEPOSIT
         const balData = balanceRes.data?.data || balanceRes.data || {};
         const actDeposit = parseFloat(balData.equity ?? balData.balance ?? 0);
 
-        // VOLUME method 1: sum of all trades notional value
-        // Docs: GET /api/v1/user/trades → value = actual filled absolute nominal value
+        // Calculate VOLUME from cached trades and orders
         let volumeFromTrades = 0;
-        for (const t of tradesRes) {
+        const cachedTrades = cached.trades || [];
+        for (const t of cachedTrades) {
             const val = Math.abs(parseFloat(t.value) || 0);
             if (val !== 0) {
                 volumeFromTrades += val;
             } else {
-                // Fallback: qty * price
                 volumeFromTrades += Math.abs((parseFloat(t.qty) || 0) * (parseFloat(t.price) || 0));
             }
         }
 
-        // VOLUME method 2: sum from filled orders history (filledQty * averagePrice)
-        // This catches orders the trades endpoint may not return
         let volumeFromOrders = 0;
-        for (const o of ordersHistRes) {
+        const cachedOrders = cached.orders || [];
+        for (const o of cachedOrders) {
             if (o.status === 'FILLED' || o.status === 'PARTIALLY_FILLED') {
                 const fq = Math.abs(parseFloat(o.filledQty) || 0);
                 const ap = Math.abs(parseFloat(o.averagePrice) || 0);
@@ -389,13 +359,12 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
                 }
             }
         }
-
-        // Use whichever source gives the higher (more complete) volume
         const finalVolume = Math.max(volumeFromTrades, volumeFromOrders);
 
-        // WIN_RATE = count of closed positions with realisedPnl > 0
+        // Calculate WIN_RATE from cached historical closed positions
         let wins = 0, totalClosed = 0;
-        for (const p of positionsRes) {
+        const cachedPositions = cached.positions || [];
+        for (const p of cachedPositions) {
             if (p.realisedPnl !== undefined) {
                 totalClosed++;
                 if (parseFloat(p.realisedPnl || 0) > 0) wins++;
@@ -406,32 +375,22 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
         // PNL = ACT_DEPOSIT - INIT_DEPOSIT
         const pnl = actDeposit - initDeposit;
 
-        logger.info(`[Extended] Trades: ${tradesRes.length}, Volume(trades): $${(volumeFromTrades || 0).toFixed(2)}, Orders: ${ordersHistRes.length}, Volume(orders): $${(volumeFromOrders || 0).toFixed(2)}, Final: $${(finalVolume || 0).toFixed(2)}`);
-
-        // RANK from leaderboard stats
+        // Leaderboard Rank
         const lbData = leaderboardRes.data?.data || {};
         const rank = lbData.rank || null;
 
-        // NATIVE PNL: try pnlChart endpoint first (matches website Total PnL)
+        // NATIVE PNL (from fresh pnl chart)
         let nativeTotalPnl = 0;
         const pnlChart = pnlChartRes.data?.data || pnlChartRes.data || [];
         if (Array.isArray(pnlChart) && pnlChart.length > 0) {
             const lastPoint = pnlChart[pnlChart.length - 1];
-            // Try all known field names from Extended API
             nativeTotalPnl = parseFloat(
                 lastPoint.totalPnl ?? lastPoint.pnl ?? lastPoint.value ?? lastPoint.cumulativePnl ?? 0
             );
         }
-        // Fallback: unrealizedPnl from balance
         if (nativeTotalPnl === 0) {
             nativeTotalPnl = parseFloat(balData.unrealisedPnl || balData.unrealizedPnl || 0);
         }
-
-        // DIAGNOSTIC: log raw balance fields to help identify correct PnL source
-        logger.info('[Extended] balData keys: ' + Object.keys(balData).join(', '));
-        logger.info('[Extended] balData values: ' + JSON.stringify(balData));
-        logger.info(`[Extended] totalIn: $${totalIn.toFixed(2)}, totalOut: $${totalOut.toFixed(2)}, deposits count: ${depositsRes.length}, withdrawals count: ${withdrawalsRes.length}`);
-        logger.info(`[Extended] pnlChart points: ${pnlChart.length}, nativePnl: $${nativeTotalPnl.toFixed(2)}, equity: $${actDeposit.toFixed(2)}, pnl(equity-net): $${pnl.toFixed(2)}`);
 
         res.json({
             init_deposit: initDeposit,
@@ -440,25 +399,141 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
             total_volume: finalVolume,
             pnl: pnl,
             win_rate: winRate,
-            // Send full points API response so frontend can sum epochRewards across seasons
             points: pointsRes.data || {},
             rank: rank,
+            requires_history_sync: requiresSync,
             partial_success: errors.length > 0 ? true : undefined,
             warnings: errors.length > 0 ? errors : undefined,
-            // DEBUG: remove after investigation
             _debug: {
                 balance_fields: balData,
                 total_in: totalIn,
                 total_out: totalOut,
-                deposits_count: depositsRes.length,
-                withdrawals_count: withdrawalsRes.length,
+                deposits_count: cachedDeposits.length,
+                withdrawals_count: cachedWithdrawals.length,
                 pnl_chart_points: pnlChart.length,
-                pnl_chart_last: pnlChart.length > 0 ? pnlChart[pnlChart.length - 1] : null
+                cached_last_sync: cached.lastSync
             }
         });
     } catch (error) {
-        logger.error('Extended Proxy Error:', error.message);
+        logger.error('Extended Stats Error:', error.message);
         res.status(500).json({ error: 'Failed to fetch Extended exchange data. Please try again.' });
+    }
+});
+
+// Incremental sync helper for Extended Starknet API
+const fetchAllExtendedPaginated = async (BASE, endpoint, cachedList = [], getUniqueId, isTerminalFn, headers) => {
+    let all = [];
+    const seen = new Set();
+    const terminalCacheIds = new Set(
+        cachedList
+            .filter(item => !isTerminalFn || isTerminalFn(item))
+            .map(item => getUniqueId(item))
+    );
+    let cursor = null;
+    let hitTerminalCache = false;
+    const fetchStartTime = Date.now();
+
+    for (let i = 0; i < 100; i++) {
+        // Strict safety time limit for Vercel functions (8.5 seconds)
+        if (Date.now() - fetchStartTime > 8500) {
+            logger.warn(`Extended sync time limit reached for ${endpoint}`);
+            break;
+        }
+        try {
+            let url = `${BASE}${endpoint}${endpoint.includes('?') ? '&' : '?'}limit=100`;
+            if (cursor) url += `&cursor=${cursor}`;
+            const r = await http.get(url, { headers });
+            const records = r.data?.data || [];
+            let added = 0;
+
+            for (const rec of (Array.isArray(records) ? records : [])) {
+                const id = getUniqueId(rec);
+                if (terminalCacheIds.has(id)) {
+                    hitTerminalCache = true;
+                }
+                if (!seen.has(id)) {
+                    seen.add(id);
+                    all.push(rec);
+                    added++;
+                }
+            }
+
+            if (hitTerminalCache) {
+                break; // Met a terminal record in cache - incremental sync complete!
+            }
+
+            const next = r.data?.pagination?.cursor;
+            if (added === 0 || !next) break;
+            cursor = next;
+        } catch (e) {
+            logger.error(`Extended pagination error [${endpoint}]:`, e.message);
+            break;
+        }
+    }
+
+    // Merge and deduplicate
+    const mergedMap = new Map();
+    for (const item of cachedList) {
+        mergedMap.set(getUniqueId(item), item);
+    }
+    for (const item of all) {
+        mergedMap.set(getUniqueId(item), item);
+    }
+    return Array.from(mergedMap.values());
+};
+
+// ─── Incremental History Sync - Extended Exchange ────────────────────────────
+app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, async (req, res) => {
+    try {
+        const entryId = req.body.entryId;
+        if (!entryId) return res.status(400).json({ error: 'entryId required' });
+
+        const apiKey = req.cookies[`ext_key_${entryId}`];
+        if (!apiKey) return res.status(404).json({ error: 'API Key not found in vault' });
+
+        const headers = {
+            'X-Api-Key': apiKey,
+            'User-Agent': 'TradeDash/1.0',
+            'Accept': 'application/json'
+        };
+
+        const BASE = 'https://api.starknet.extended.exchange/api/v1';
+        const cacheKey = `cache:extended:${entryId}`;
+        const cached = await store.get(cacheKey) || {
+            trades: [],
+            deposits: [],
+            withdrawals: [],
+            positions: [],
+            orders: [],
+            lastSync: 0
+        };
+
+        logger.info(`Starting incremental history sync for Extended: ${entryId}`);
+
+        // Fetch paginated history in parallel using incremental matching
+        const [trades, deposits, withdrawals, positions, orders] = await Promise.all([
+            fetchAllExtendedPaginated(BASE, '/user/trades', cached.trades, t => t.id || JSON.stringify(t), () => true, headers),
+            fetchAllExtendedPaginated(BASE, '/user/assetOperations?type=DEPOSIT&status=COMPLETED', cached.deposits, op => op.id || JSON.stringify(op), () => true, headers),
+            fetchAllExtendedPaginated(BASE, '/user/assetOperations?type=WITHDRAWAL&status=COMPLETED', cached.withdrawals, op => op.id || JSON.stringify(op), () => true, headers),
+            fetchAllExtendedPaginated(BASE, '/user/positions/history', cached.positions, p => p.id || JSON.stringify(p), () => true, headers),
+            fetchAllExtendedPaginated(BASE, '/user/orders/history', cached.orders, o => o.id || JSON.stringify(o), o => ['FILLED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(o.status), headers)
+        ]);
+
+        // Save updated data to cache
+        await store.set(cacheKey, {
+            trades,
+            deposits,
+            withdrawals,
+            positions,
+            orders,
+            lastSync: Date.now()
+        }, 30 * 24 * 60 * 60); // 30 days TTL
+
+        logger.info(`Completed history sync for Extended: ${entryId}`);
+        res.json({ success: true });
+    } catch (e) {
+        logger.error('Extended history sync failed:', e.message);
+        res.status(500).json({ error: 'History sync failed' });
     }
 });
 
@@ -466,7 +541,6 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
 // ─── Proxy - Nado Exchange (Ink L2) ─────────────────────────────────────────
 app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) => {
     try {
-        // walletAddress allows multi-wallet: each Nado card provides its own address
         const { address, walletAddress } = req.body;
         const targetAddress = walletAddress || address;
         if (!targetAddress) return res.status(400).json({ error: 'Address required' });
@@ -476,17 +550,38 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
             'Content-Type': 'application/json'
         };
 
-        // build sender from targetAddress for Nado (pad with default)
         const hexAddr = targetAddress.replace('0x', '').toLowerCase();
         const nameHex = Buffer.from('default', 'ascii').toString('hex').padEnd(24, '0');
         const sender = '0x' + hexAddr + nameHex;
+
+        // Load cached orders
+        const cacheKey = `cache:nado:${targetAddress}`;
+        const cached = await store.get(cacheKey) || {
+            orders: [],
+            lastSync: 0
+        };
+
+        const requiresSync = !cached.lastSync || (Date.now() - cached.lastSync > 5 * 60 * 1000);
 
         let totalEquity = 0;
         let pnlFromTrades = 0;
         let wins = 0, totalClosed = 0;
 
-        // 1. Fetch balance (Total Equity)
-        const subRes = await http.get(`https://gateway.prod.nado.xyz/v1/query?type=subaccount_info&subaccount=${sender}`).catch(() => ({ data: {} }));
+        // 1. Fetch balance (Total Equity), active deposit snapshot, events, and points fresh in parallel
+        const [subRes, snapRes, evRes, pointsRes] = await Promise.all([
+            http.get(`https://gateway.prod.nado.xyz/v1/query?type=subaccount_info&subaccount=${sender}`).catch(() => ({ data: {} })),
+            http.post('https://archive.prod.nado.xyz/v1', {
+                account_snapshots: { subaccounts: [sender], timestamps: [Date.now() * 1000000], active: false }
+            }, { headers: archiveHeaders }).catch(() => ({ data: {} })),
+            http.post('https://archive.prod.nado.xyz/v1', {
+                events: { subaccounts: [sender], event_types: ['deposit_collateral', 'withdraw_collateral'], limit: { raw: 2000 } }
+            }, { headers: archiveHeaders }).catch(() => ({ data: {} })),
+            http.post('https://archive.prod.nado.xyz/v1', {
+                nado_points: { address: targetAddress }
+            }, { headers: archiveHeaders }).catch(() => ({ data: {} }))
+        ]);
+
+        // Parse Spot balances
         const spotBalances = subRes.data?.data?.spot_balances || subRes.data?.spot_balances || [];
         for (const b of spotBalances) {
             if (b && (b.product_id === 0 || b.product_id === 5)) {
@@ -494,11 +589,7 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
             }
         }
 
-        // 2. Snapshot (active:false) => VOLUME (sum quote_volume_cumulative per product) + INIT_DEPOSIT fallback
-        const snapRes = await http.post('https://archive.prod.nado.xyz/v1', {
-            account_snapshots: { subaccounts: [sender], timestamps: [Date.now() * 1000000], active: false }
-        }, { headers: archiveHeaders }).catch(() => ({ data: {} }));
-
+        // Parse Snapshots for volume & net entry cumulative
         let totalVolumeFromSnap = 0, initDepositFromSnap = 0;
         const snapData = snapRes.data?.snapshots?.[sender];
         if (snapData) {
@@ -509,12 +600,7 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
             }
         }
 
-        // 3. INIT_DEPOSIT via collateral events (delta = post - pre spot balance)
-        //    No product_id filter — captures both USDT0 (id:0) and USDC (id:5) deposits
-        const evRes = await http.post('https://archive.prod.nado.xyz/v1', {
-            events: { subaccounts: [sender], event_types: ['deposit_collateral', 'withdraw_collateral'], limit: { raw: 2000 } }
-        }, { headers: archiveHeaders }).catch(() => ({ data: {} }));
-
+        // Parse Collateral Events for net entry cumulative
         let initDepositFromEvents = 0;
         const evts = evRes.data?.events || [];
         for (const ev of evts) {
@@ -522,12 +608,12 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
             const post = BigInt(ev.post_balance?.spot?.balance?.amount || 0);
             initDepositFromEvents += Number(post - pre) / 1e18;
         }
+        const initDeposit = evts.length > 0 ? initDepositFromEvents : initDepositFromSnap;
 
-        // NATIVE PNL (Unsettled USDT0 / Unrealized PnL)
+        // Parse Unrealized PnL (Native PnL)
         let nativeTotalPnl = 0;
         const perpBalances = subRes.data?.data?.perp_balances || subRes.data?.perp_balances || [];
         const perpProducts = subRes.data?.data?.perp_products || subRes.data?.perp_products || [];
-        
         for (const pb of perpBalances) {
             const pid = pb.product_id;
             const product = perpProducts.find(p => p.product_id === pid);
@@ -542,30 +628,12 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
         // Total Active Deposit (Equity) = Settled Spot + Unrealized PnL
         const fullEquity = totalEquity + nativeTotalPnl;
 
-        const initDeposit = evts.length > 0 ? initDepositFromEvents : initDepositFromSnap;
-
-        // 4. Orders for PNL + WIN_RATE
-        let allOrders = [], cursor = null, hasMore = true;
-        const startTime = Date.now();
-        for (let i = 0; i < 200; i++) {
-            if (!hasMore || (Date.now() - startTime > 8000)) break;
-            const pld = { orders: { subaccounts: [sender], limit: 100 } };
-            if (cursor) pld.orders.idx = cursor;
-            const r = await http.post('https://archive.prod.nado.xyz/v1', pld, { headers: archiveHeaders }).catch(() => null);
-            const batch = r?.data?.orders || [];
-            if (batch.length > 0) { 
-                cursor = batch[batch.length-1].idx; // Use idx for pagination, not submission_idx
-                allOrders = allOrders.concat(batch); 
-                if (batch.length < 100) hasMore = false; 
-            }
-            else hasMore = false;
-        }
-
-        for (const o of allOrders) {
+        // Calculate Win Rate & realized PNL from cached historical orders
+        const cachedOrders = cached.orders || [];
+        for (const o of cachedOrders) {
             const rpnl = (parseFloat(o.realized_pnl) || 0) / 1e18;
             const fee  = (parseFloat(o.fee) || 0) / 1e18;
             pnlFromTrades += (rpnl - fee);
-            // Only count actual trades (product_id 0 = USDT0 collateral movements, not trades)
             if (o.product_id !== 0 && (parseFloat(o.realized_pnl) || 0) !== 0) {
                 totalClosed++;
                 if (rpnl > 0) wins++;
@@ -573,33 +641,17 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
         }
         const winRate = totalClosed > 0 ? (wins / totalClosed) * 100 : 0;
 
-        // 5. Points & Rank
-        const pointsRes = await http.post('https://archive.prod.nado.xyz/v1', {
-            nado_points: { address: targetAddress }
-        }, { headers: archiveHeaders }).catch(() => ({ data: {} }));
+        // Points & Rank
         const allTime = pointsRes.data?.all_time_points || {};
         const totalPoints = parseFloat(allTime.points || 0);
         const rank = allTime.rank ? parseInt(allTime.rank) : null;
 
         const finalVolume = totalVolumeFromSnap;
-        // PnL calculated via Equity - Net Deposits is much more reliable for Nado
         const finalPnl    = fullEquity - initDeposit;
-
-        // DIAGNOSTIC: Нado deposit/withdrawal breakdown
-        let totalDeposited = 0, totalWithdrawn = 0;
-        for (const ev of evts) {
-            const pre  = BigInt(ev.pre_balance?.spot?.balance?.amount  || 0);
-            const post = BigInt(ev.post_balance?.spot?.balance?.amount || 0);
-            const delta = Number(post - pre) / 1e18;
-            if (delta > 0) totalDeposited += delta;
-            else totalWithdrawn += Math.abs(delta);
-        }
-        logger.info('[Nado] SnapVol: $' + totalVolumeFromSnap.toFixed(2) + ', Orders: ' + allOrders.length + ', InitDep: $' + initDeposit.toFixed(2) + ', FullEquity: $' + fullEquity.toFixed(2) + ', FinalPnl: $' + finalPnl.toFixed(2));
-        logger.info('[Nado] Events: ' + evts.length + ', TotalDeposited: $' + totalDeposited.toFixed(2) + ', TotalWithdrawn: $' + totalWithdrawn.toFixed(2) + ', NetDep: $' + (totalDeposited - totalWithdrawn).toFixed(2));
 
         res.json({
             snapshot: { assets: fullEquity },
-            matches: allOrders,
+            matches: cachedOrders,
             points: totalPoints,
             init_deposit: initDeposit,
             act_deposit: fullEquity,
@@ -609,23 +661,102 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
             win_rate: winRate,
             rank: rank,
             wallet: targetAddress,
-            // DEBUG: remove after investigation
+            requires_history_sync: requiresSync,
             _debug: {
                 events_count: evts.length,
-                total_deposited: totalDeposited,
-                total_withdrawn: totalWithdrawn,
-                net_deposits: totalDeposited - totalWithdrawn,
+                net_deposits: initDeposit,
                 full_equity: fullEquity,
                 settled_equity: totalEquity,
                 native_pnl: nativeTotalPnl,
-                orders_count: allOrders.length,
-                pnl_from_trades: pnlFromTrades
+                orders_count: cachedOrders.length,
+                pnl_from_trades: pnlFromTrades,
+                cached_last_sync: cached.lastSync
             }
         });
-
     } catch (error) {
         logger.error('Nado Proxy Error:', error.message);
         res.status(500).json({ error: 'Failed to fetch Nado exchange data. Please try again.' });
+    }
+});
+
+// ─── Incremental History Sync - Nado Exchange ────────────────────────────────
+app.post('/api/exchanges/nado/sync-history', apiLimiter, csrfProtect, async (req, res) => {
+    try {
+        const { address, walletAddress } = req.body;
+        const targetAddress = walletAddress || address;
+        if (!targetAddress) return res.status(400).json({ error: 'Address required' });
+
+        const archiveHeaders = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        };
+
+        const hexAddr = targetAddress.replace('0x', '').toLowerCase();
+        const nameHex = Buffer.from('default', 'ascii').toString('hex').padEnd(24, '0');
+        const sender = '0x' + hexAddr + nameHex;
+
+        // Load cached orders
+        const cacheKey = `cache:nado:${targetAddress}`;
+        const cached = await store.get(cacheKey) || {
+            orders: [],
+            lastSync: 0
+        };
+
+        logger.info(`Starting incremental history sync for Nado: ${targetAddress}`);
+
+        let allOrders = [], cursor = null, hasMore = true;
+        const cacheIds = new Set(cached.orders.map(o => o.idx || JSON.stringify(o)));
+        let hitCache = false;
+        const startTime = Date.now();
+
+        for (let i = 0; i < 200; i++) {
+            // Strict 8.5 seconds serverless time budget limit
+            if (!hasMore || (Date.now() - startTime > 8500)) break;
+            const pld = { orders: { subaccounts: [sender], limit: 100 } };
+            if (cursor) pld.orders.idx = cursor;
+            
+            const r = await http.post('https://archive.prod.nado.xyz/v1', pld, { headers: archiveHeaders }).catch(() => null);
+            const batch = r?.data?.orders || [];
+            if (batch.length > 0) { 
+                cursor = batch[batch.length-1].idx;
+                
+                for (const o of batch) {
+                    const id = o.idx || JSON.stringify(o);
+                    if (cacheIds.has(id)) {
+                        hitCache = true;
+                    }
+                    allOrders.push(o);
+                }
+                
+                if (hitCache) {
+                    break; // Hit cached orders - sync complete!
+                }
+                if (batch.length < 100) hasMore = false; 
+            }
+            else hasMore = false;
+        }
+
+        // Merge and deduplicate
+        const mergedMap = new Map();
+        for (const o of cached.orders) {
+            mergedMap.set(o.idx || JSON.stringify(o), o);
+        }
+        for (const o of allOrders) {
+            mergedMap.set(o.idx || JSON.stringify(o), o);
+        }
+        const finalOrders = Array.from(mergedMap.values());
+
+        // Save updated cache
+        await store.set(cacheKey, {
+            orders: finalOrders,
+            lastSync: Date.now()
+        }, 30 * 24 * 60 * 60); // 30 days TTL
+
+        logger.info(`Completed history sync for Nado: ${targetAddress}`);
+        res.json({ success: true });
+    } catch (e) {
+        logger.error('Nado history sync failed:', e.message);
+        res.status(500).json({ error: 'Nado history sync failed' });
     }
 });
 

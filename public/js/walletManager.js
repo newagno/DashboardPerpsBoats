@@ -5,6 +5,12 @@
  * Multi-wallet: activeExchanges is now an array of objects:
  *   { id, exchange, walletAddress, label, updatedAt, manualData }
  */
+// Safe UUID generator — works in HTTPS and HTTP (local IP / test envs)
+const _generateId = () =>
+    (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : Date.now().toString(36) + Math.random().toString(36).substring(2);
+
 class WalletManager {
     constructor() {
         this.state = {
@@ -159,7 +165,7 @@ class WalletManager {
      * @param {string|null} label - display label
      */
     async addExchange(exchange, walletAddress = null, label = null) {
-        if (!this.state.isAuthenticated) {
+        if (exchange !== 'nado' && !this.state.isAuthenticated) {
             if (this.state.address) {
                 try { await this.loginToBackend(); } catch(e) { return { success: false, error: 'Login cancelled' }; }
             } else {
@@ -170,7 +176,7 @@ class WalletManager {
         const addr = (walletAddress || this.state.address || '').toLowerCase();
         
         const entry = {
-            id: crypto.randomUUID(),
+            id: _generateId(),
             exchange,
             walletAddress: addr || null,
             label: label || (exchange.charAt(0).toUpperCase() + exchange.slice(1)),
@@ -197,7 +203,7 @@ class WalletManager {
             }
         }
         const entry = {
-            id: crypto.randomUUID(), // collision-proof
+            id: _generateId(),
             exchange: 'variational',
             walletAddress: walletAddress || null,
             label: label || 'Variational',
@@ -237,7 +243,8 @@ class WalletManager {
      * Remove wallet entry by its unique id.
      */
     async removeExchange(id) {
-        if (!this.state.isAuthenticated) {
+        const entry = this.state.activeExchanges.find(e => e.id === id);
+        if (entry && entry.exchange !== 'nado' && !this.state.isAuthenticated) {
             if (this.state.address) {
                 try { await this.loginToBackend(); } catch(e) { return; }
             } else {

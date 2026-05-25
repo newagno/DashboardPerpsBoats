@@ -140,6 +140,58 @@ class RefreshEngine {
         window.dashboardMgr.updateSummary();
         document.getElementById('last-update').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
 
+        // Trigger client-initiated background sync if server indicates requires_history_sync
+        results.forEach(r => {
+            if (r.success && r.data && r.data.requires_history_sync) {
+                console.log(`Initiating client-side background sync for ${r.exchange} ID ${r.id}...`);
+                const syncUrl = `/api/exchanges/${r.exchange}/sync-history`;
+                const requestBody = r.exchange === 'extended' 
+                    ? { entryId: r.id } 
+                    : { address: r.walletAddress, walletAddress: r.walletAddress };
+                
+                fetch(syncUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'TradeDash'
+                    },
+                    body: JSON.stringify(requestBody)
+                }).then(async (syncResponse) => {
+                    if (syncResponse.ok) {
+                        console.log(`Background sync completed for ${r.exchange} ID ${r.id}. Re-fetching fresh stats...`);
+                        
+                        let freshData;
+                        if (r.exchange === 'extended') {
+                            const obj = new window.Exchanges.Extended(null, r.id);
+                            freshData = await obj.getStats();
+                        } else if (r.exchange === 'nado') {
+                            const obj = new window.Exchanges.Nado(r.walletAddress);
+                            freshData = await obj.getStats();
+                        }
+                        
+                        if (freshData) {
+                            r.data = freshData;
+                            // Update cache
+                            try {
+                                const cacheStr = localStorage.getItem('exchange_cache_v1');
+                                const cache = cacheStr ? JSON.parse(cacheStr) : {};
+                                cache[r.id] = r;
+                                localStorage.setItem('exchange_cache_v1', JSON.stringify(cache));
+                            } catch (e) {}
+                            
+                            // Re-render UI to display updated history stats
+                            window.dashboardMgr.updateAllWalletCards(results);
+                            window.dashboardMgr.updateSummary();
+                        }
+                    } else {
+                        console.error(`Background sync failed for ${r.exchange} ID ${r.id}`);
+                    }
+                }).catch(e => {
+                    console.error(`Background sync failed for ${r.exchange} ID ${r.id}:`, e);
+                });
+            }
+        });
+
         this.isRefreshing = false;
         this.updateLoadingState(false);
     }

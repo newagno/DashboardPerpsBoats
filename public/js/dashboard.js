@@ -249,8 +249,14 @@ class DashboardManager {
                     winRate:     parseFloat(document.getElementById('var-win-rate').value) || 0,
                     roi:         parseFloat(document.getElementById('var-roi').value) || 0
                 };
-                const result = await window.walletManager.addVariationalManual(manualData, walletAddress, label);
-                if (!result || !result.success) return; // login was cancelled
+                const result = await window.walletManager.addVariationalManual(manualData, walletAddress, label).catch(e => ({ success: false, error: e.message }));
+                if (!result || !result.success) {
+                    const errMsg = result?.error || (window.i18n ? window.i18n.t('please_login_first') : 'Auth error. Please connect wallet and sign.');
+                    const vm = document.getElementById('wallet-addr-validation');
+                    if (vm) { vm.textContent = '⚠ ' + errMsg; vm.classList.add('show'); }
+                    else alert(errMsg);
+                    return;
+                }
                 ['var-wallet-address','var-init-deposit','var-act-deposit','var-volume','var-points','var-rank','var-win-rate','var-roi'].forEach(fid => {
                     const el = document.getElementById(fid); if (el) el.value = '';
                 });
@@ -302,8 +308,14 @@ class DashboardManager {
                 return;
             }
 
-            const result = await window.walletManager.addExchange(exc, walletAddr, label);
-            if (!result || !result.success) return; // login was cancelled
+            const result = await window.walletManager.addExchange(exc, walletAddr, label).catch(e => ({ success: false, error: e.message }));
+            if (!result || !result.success) {
+                const errMsg = result?.error || (window.i18n ? window.i18n.t('please_login_first') : 'Auth error. Please connect wallet and sign.');
+                const vm = document.getElementById('wallet-addr-validation');
+                if (vm) { vm.textContent = '⚠ ' + errMsg; vm.classList.add('show'); }
+                else alert(errMsg);
+                return;
+            }
             if (exc === 'extended') {
                 const pkInput = document.getElementById('extended-api-key');
                 const pk = pkInput.value.trim();

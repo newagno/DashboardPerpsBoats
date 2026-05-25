@@ -12,6 +12,7 @@ const translations = {
         'btn_add_exchange': '[ + ] ADD_EXCHANGE',
         'btn_connect': 'Connect & Authenticate',
         'btn_disconnect': 'Disconnect',
+        'please_login_first': 'Please login (sign the message) first to sync exchanges.',
         
         'modal_title': 'MODULE / LINK_EXCHANGE',
         'modal_close': 'ESC',
@@ -94,6 +95,7 @@ const translations = {
         'btn_add_exchange': '[ + ] ДОДАТИ БІРЖУ',
         'btn_connect': 'Підключитись',
         'btn_disconnect': 'Відключитись',
+        'please_login_first': 'Будь ласка, підключіть гаманець та авторизуйтесь (підпишіть повідомлення) для синхронізації бірж.',
         
         'modal_title': 'МОДУЛЬ / ПІДКЛЮЧЕННЯ БІРЖІ',
         'modal_close': 'ESC',

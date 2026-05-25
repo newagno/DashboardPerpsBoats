@@ -497,18 +497,43 @@ class DashboardManager {
     }
 
     updateAllWalletCards(results) {
-        this.walletsContainer.innerHTML = '';
         if (!results || results.length === 0) {
             this.walletsContainer.innerHTML = `<div class="empty-state"><p>${window.i18n ? window.i18n.t('no_exchanges') : 'NO EXCHANGES ADDED.'}</p></div>`;
             return;
         }
 
-        results.forEach(res => {
+        // 1. Identify fresh active card IDs
+        const freshIds = new Set(results.map(r => r.id));
+
+        // 2. Remove obsolete elements (including empty states and removed card nodes)
+        const currentChildren = Array.from(this.walletsContainer.children);
+        currentChildren.forEach(child => {
+            const id = child.dataset?.id;
+            if (!id || !freshIds.has(id)) {
+                child.remove();
+            }
+        });
+
+        // 3. Patch existing cards or append new ones in the exact results order
+        results.forEach((res, i) => {
             if (res.success) {
                 this.walletData[res.id] = this.processExchangeData(res.exchange, res.data);
             }
-            this.walletsContainer.appendChild(this.createExchangeCard(res));
+
+            let card = this.walletsContainer.querySelector(`[data-id="${res.id}"]`);
+            if (card) {
+                this.patchCard(card, res);
+            } else {
+                card = this.createExchangeCard(res);
+            }
+
+            // Reposition element if it is not at the correct visual index
+            const childAtIndex = this.walletsContainer.children[i];
+            if (childAtIndex !== card) {
+                this.walletsContainer.insertBefore(card, childAtIndex || null);
+            }
         });
+
         this.setupDragAndDrop();
         this.updateSummary();
     }
@@ -615,20 +640,126 @@ class DashboardManager {
 
         card.innerHTML = headerHtml(editBtnHtml) + `
             <div class="wallet-stats-grid">
-                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_init_deposit') : '01 // INIT_DEPOSIT'}</span><span class="stat-value">${window.Utils.formatCurrency(data.initDeposit)}</span></div>
-                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_act_deposit') : '02 // ACT_DEPOSIT'}</span><span class="stat-value">${window.Utils.formatCurrency(data.actDeposit)}</span></div>
-                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_volume') : '03 // VOLUME'}</span><span class="stat-value">${window.Utils.formatCurrency(data.volume)}</span></div>
-                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_points') : '04 // POINTS'}</span><span class="stat-value">${(data.points || 0).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_rank') : '05 // RANK'}</span><span class="stat-value">${data.rank ? data.rank : 'N/A'}</span></div>
-                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_pnl') : '06 // PNL'}</span><span class="stat-value ${pnlClass}">${window.Utils.formatCurrency(data.pnl)}</span></div>
-                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_win_rate') : '07 // WIN_RATE'}</span><span class="stat-value">${window.Utils.formatPercent(data.winRate)}</span></div>
-                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_roi') : '08 // ROI'}</span><span class="stat-value ${roiClass}">${window.Utils.formatPercent(roi)}</span></div>
-                <div class="wallet-stat" style="border-top: 1px dashed rgba(255,72,54,0.3); margin-top:2px;"><span class="stat-label" style="color: rgba(255,72,54,0.7);">${window.i18n ? window.i18n.t('card_point_value') : '09 // $/POINT'}</span><span class="stat-value" style="color: rgba(255,72,54,0.9); font-size:12px;">${pointValue}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_init_deposit') : '01 // INIT_DEPOSIT'}</span><span class="stat-value val-init-deposit">${window.Utils.formatCurrency(data.initDeposit)}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_act_deposit') : '02 // ACT_DEPOSIT'}</span><span class="stat-value val-act-deposit">${window.Utils.formatCurrency(data.actDeposit)}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_volume') : '03 // VOLUME'}</span><span class="stat-value val-volume">${window.Utils.formatCurrency(data.volume)}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_points') : '04 // POINTS'}</span><span class="stat-value val-points">${(data.points || 0).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_rank') : '05 // RANK'}</span><span class="stat-value val-rank">${data.rank ? data.rank : 'N/A'}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_pnl') : '06 // PNL'}</span><span class="stat-value val-pnl ${pnlClass}">${window.Utils.formatCurrency(data.pnl)}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_win_rate') : '07 // WIN_RATE'}</span><span class="stat-value val-win-rate">${window.Utils.formatPercent(data.winRate)}</span></div>
+                <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_roi') : '08 // ROI'}</span><span class="stat-value val-roi ${roiClass}">${window.Utils.formatPercent(roi)}</span></div>
+                <div class="wallet-stat" style="border-top: 1px dashed rgba(255,72,54,0.3); margin-top:2px;"><span class="stat-label" style="color: rgba(255,72,54,0.7);">${window.i18n ? window.i18n.t('card_point_value') : '09 // $/POINT'}</span><span class="stat-value val-point-value" style="color: rgba(255,72,54,0.9); font-size:12px;">${pointValue}</span></div>
             </div>
             <div class="wallet-footer">
                 <span class="timestamp">${footerTimestamp}</span>
             </div>`;
         return card;
+    }
+
+    patchCard(existingCard, res) {
+        const { id, exchange, success, error } = res;
+        
+        // If success status changed (success vs error), just re-render card content to avoid complex structure transition logic
+        const wasSuccess = existingCard.querySelector('.wallet-stats-grid') !== null;
+        if (wasSuccess !== success) {
+            const freshCard = this.createExchangeCard(res);
+            existingCard.innerHTML = freshCard.innerHTML;
+            return;
+        }
+
+        if (!success) {
+            // Both are errors, update error message if changed
+            const errorContainer = existingCard.querySelector('.error-text');
+            if (errorContainer) {
+                const newErrText = `SYNC ERROR: ${this.escapeHtml(error || (window.i18n ? window.i18n.t('failed_sync') : 'Connection Failed'))}`;
+                if (errorContainer.innerHTML !== newErrText) {
+                    errorContainer.innerHTML = newErrText;
+                }
+            }
+            return;
+        }
+
+        // Both are successes, patch the values in-place
+        const data = this.walletData[id] || {};
+        const pnlClass = (data.pnl || 0) >= 0 ? 'positive' : 'negative';
+
+        // ── $/POINT metric ─────────────────────────────────────────────────
+        let pointValue = 'FREE';
+        if (data.points && data.points > 0) {
+            if (data.pnl < 0) {
+                pointValue = `$${(Math.abs(data.pnl) / data.points).toFixed(4)}`;
+            } else {
+                pointValue = `+$${(data.pnl / data.points).toFixed(4)}`;
+            }
+        } else {
+            pointValue = 'N/A';
+        }
+
+        let roi = 0;
+        if (exchange === 'variational' && data.roi !== undefined && data.roi !== null) {
+            roi = data.roi;
+        } else {
+            roi = data.initDeposit > 0 ? (data.pnl / data.initDeposit) * 100 : 0;
+        }
+        const roiClass = roi >= 0 ? 'positive' : 'negative';
+
+        // Variational footer check
+        let footerTimestamp;
+        if (exchange === 'variational' && res.data && res.data._inputDate) {
+            const inputD = new Date(res.data._inputDate);
+            const dateStr = inputD.toLocaleDateString() + ' ' + inputD.toLocaleTimeString();
+            footerTimestamp = `${window.i18n ? window.i18n.t('var_input_date') : 'Data entered'}: ${dateStr}`;
+        } else {
+            footerTimestamp = `Last sync: ${new Date().toLocaleTimeString()}`;
+        }
+
+        // Selective DOM element content and class updates
+        const updateText = (selector, val) => {
+            const el = existingCard.querySelector(selector);
+            if (el && el.textContent !== String(val)) {
+                el.textContent = String(val);
+            }
+        };
+
+        updateText('.val-init-deposit', window.Utils.formatCurrency(data.initDeposit));
+        updateText('.val-act-deposit', window.Utils.formatCurrency(data.actDeposit));
+        updateText('.val-volume', window.Utils.formatCurrency(data.volume));
+        updateText('.val-points', (data.points || 0).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+        updateText('.val-rank', data.rank ? data.rank : 'N/A');
+        
+        // PNL update with class
+        const pnlEl = existingCard.querySelector('.val-pnl');
+        if (pnlEl) {
+            const fmtPnl = window.Utils.formatCurrency(data.pnl);
+            if (pnlEl.textContent !== fmtPnl) {
+                pnlEl.textContent = fmtPnl;
+            }
+            pnlEl.className = `stat-value val-pnl ${pnlClass}`;
+        }
+
+        updateText('.val-win-rate', window.Utils.formatPercent(data.winRate));
+        
+        // ROI update with class
+        const roiEl = existingCard.querySelector('.val-roi');
+        if (roiEl) {
+            const fmtRoi = window.Utils.formatPercent(roi);
+            if (roiEl.textContent !== fmtRoi) {
+                roiEl.textContent = fmtRoi;
+            }
+            roiEl.className = `stat-value val-roi ${roiClass}`;
+        }
+
+        // Point value element
+        const ptValEl = existingCard.querySelector('.val-point-value');
+        if (ptValEl && ptValEl.textContent !== pointValue) {
+            ptValEl.textContent = pointValue;
+        }
+
+        // Footer Timestamp
+        const timeEl = existingCard.querySelector('.timestamp');
+        if (timeEl && timeEl.textContent !== footerTimestamp) {
+            timeEl.textContent = footerTimestamp;
+        }
     }
 
     removeWallet(id) {
@@ -730,6 +861,9 @@ class DashboardManager {
 
         const cards = container.querySelectorAll('.wallet-card');
         cards.forEach(card => {
+            if (card.dataset.dragInitialized === 'true') return;
+            card.dataset.dragInitialized = 'true';
+
             card.setAttribute('draggable', true);
             card.style.cursor = 'grab';
             

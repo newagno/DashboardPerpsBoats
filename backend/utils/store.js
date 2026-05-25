@@ -154,5 +154,6 @@ module.exports = {
     get,
     set,
     del,
-    exists
+    exists,
+    getClient: () => redisClient
 };

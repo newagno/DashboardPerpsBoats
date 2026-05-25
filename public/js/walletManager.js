@@ -33,8 +33,25 @@ class WalletManager {
         };
 
         this._syncDebounceTimer = null;
-        this._reconnectTimer = null;
-        this._syncEventSource = null;
+
+        // Establish native BroadcastChannel for cross-tab synchronization
+        this._syncChannel = new BroadcastChannel('wallet_state_sync');
+        this._syncChannel.onmessage = (event) => {
+            if (event.data && event.data.type === 'EXCHANGES_UPDATED' && event.data.payload) {
+                console.log('BroadcastChannel: Received activeExchanges update from another tab');
+                
+                // Compare before updating to prevent infinite redraw loops
+                const localStr = JSON.stringify(this.state.activeExchanges);
+                const incomingStr = JSON.stringify(event.data.payload);
+                if (localStr !== incomingStr) {
+                    this.state.activeExchanges = event.data.payload;
+                    
+                    // Dispatch custom event to notify dashboard UI to re-render
+                    const syncEvent = new CustomEvent('exchanges-synced', { detail: event.data.payload });
+                    window.dispatchEvent(syncEvent);
+                }
+            }
+        };
 
         this.init();
     }
@@ -111,6 +128,12 @@ class WalletManager {
 
     _saveExchanges() {
         localStorage.setItem('wallet_state_exchanges_v3', JSON.stringify(this.state.activeExchanges));
+        if (this._syncChannel) {
+            this._syncChannel.postMessage({
+                type: 'EXCHANGES_UPDATED',
+                payload: this.state.activeExchanges
+            });
+        }
         if (this.state.isAuthenticated) {
             this.syncExchangesToBackend().catch(err => console.error('Failed to save exchanges to server:', err));
         }
@@ -360,9 +383,8 @@ class WalletManager {
         this.state.address = null;
         this.state.chainId = null;
         this.state.isAuthenticated = false;
-        if (this._syncEventSource) {
-            this._syncEventSource.close();
-            this._syncEventSource = null;
+        if (this._syncChannel) {
+            this._syncChannel.close();
         }
         localStorage.removeItem('wallet_state_address');
         localStorage.removeItem('wallet_state_chainId');
@@ -462,8 +484,7 @@ class WalletManager {
                         await this.syncExchangesToBackend();
                     }
 
-                    // Connect real-time Server-Sent Events stream
-                    this.initSyncStream();
+
                 }
             }
         } catch (e) {
@@ -492,58 +513,6 @@ class WalletManager {
         }, 300);
     }
 
-    /** Setup Server-Sent Events (SSE) listener for real-time propagation of updates. */
-    initSyncStream() {
-        if (!this.state.isAuthenticated) return;
-        
-        if (this._syncEventSource) {
-            this._syncEventSource.close();
-            this._syncEventSource = null;
-        }
-
-        console.log('Initializing real-time sync stream...');
-        const sse = new EventSource('/api/exchanges/sync');
-
-        sse.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                if (data.type === 'update') {
-                    console.log('Received real-time exchange sync update:', data.exchanges);
-                    
-                    // Check if local is actually different to prevent infinite updates / unnecessary DOM refreshes
-                    const localStr = JSON.stringify(this.state.activeExchanges);
-                    const incomingStr = JSON.stringify(data.exchanges);
-                    
-                    if (localStr !== incomingStr) {
-                        const merged = this.mergeExchanges(this.state.activeExchanges, data.exchanges);
-                        this.state.activeExchanges = merged;
-                        const mergedStr = JSON.stringify(merged);
-                        localStorage.setItem('wallet_state_exchanges_v3', mergedStr);
-                        
-                        // Dispatch custom event to notify dashboard UI to re-render
-                        const syncEvent = new CustomEvent('exchanges-synced', { detail: merged });
-                        window.dispatchEvent(syncEvent);
-                    }
-                }
-            } catch (e) {
-                console.error('Failed to parse sync stream message:', e);
-            }
-        };
-
-        sse.onerror = (err) => {
-            console.warn('Sync stream encountered an error or disconnected. Reconnecting...');
-            sse.close();
-            
-            clearTimeout(this._reconnectTimer);
-            this._reconnectTimer = setTimeout(() => {
-                if (this.state.isAuthenticated) {
-                    this.initSyncStream();
-                }
-            }, 5000); // retry after 5s
-        };
-
-        this._syncEventSource = sse;
-    }
 }
 
 window.walletManager = new WalletManager();

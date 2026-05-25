@@ -18,48 +18,6 @@ const isProd = process.env.NODE_ENV === 'production';
 // ── Initialize Redis (async, non-blocking) ──────────────────────────────────
 store.initRedis().catch(err => logger.error('Redis init failed:', err));
 
-// ── Initialize Redis Pub/Sub sync clients ───────────────────────────────────
-let redisPublisher = null;
-if (process.env.REDIS_URL) {
-    const Redis = require('ioredis');
-    redisPublisher = new Redis(process.env.REDIS_URL, {
-        maxRetriesPerRequest: 3,
-        connectTimeout: 5000,
-        lazyConnect: true
-    });
-    redisPublisher.connect().catch(err => logger.error('Redis sync publisher connection failed:', err.message));
-}
-
-const EventEmitter = require('events');
-const localSyncEmitter = new EventEmitter();
-localSyncEmitter.setMaxListeners(200); // Prevent MaxListeners warning for many concurrent SSE clients
-
-// ── Global Redis Subscriber (single shared connection, routes to per-client emitters) ─
-// This prevents connection exhaustion: one subscriber per process, not per SSE client.
-let globalRedisSub = null;
-if (process.env.REDIS_URL) {
-    const Redis = require('ioredis');
-    globalRedisSub = new Redis(process.env.REDIS_URL, {
-        maxRetriesPerRequest: null,
-        connectTimeout: 5000,
-        lazyConnect: true
-    });
-    globalRedisSub.connect()
-        .then(() => globalRedisSub.psubscribe('user:exchanges:*'))
-        .catch(err => logger.error('Global Redis subscriber failed:', err.message));
-
-    globalRedisSub.on('pmessage', (_pattern, channel, message) => {
-        // Route to the matching localSyncEmitter channel
-        const address = channel.replace('user:exchanges:', '');
-        try {
-            const exchanges = JSON.parse(message);
-            localSyncEmitter.emit('sync:' + address, exchanges);
-        } catch (e) {
-            logger.error('Failed to parse Redis pmessage:', e);
-        }
-    });
-}
-
 // Axios instance with global timeout (reduced for Vercel)
 const http = axios.create({ timeout: isProd ? 9000 : 60000 });
 
@@ -114,12 +72,24 @@ app.use(express.json());
 app.use(cookieParser());
 
 // ── Rate Limiting ───────────────────────────────────────────────────────────
+const { RedisStore } = require('rate-limit-redis');
+
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 30,                   // 30 requests per window
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Too many authentication attempts. Try again later.' }
+    message: { error: 'Too many authentication attempts. Try again later.' },
+    store: new RedisStore({
+        sendCommand: (...args) => {
+            const client = store.getClient();
+            if (client) {
+                return client.call(...args);
+            }
+            logger.warn('Redis client not ready/available for auth rate limiter, falling back to memory degradation mode');
+            return Promise.resolve();
+        }
+    })
 });
 
 const apiLimiter = rateLimit({
@@ -127,7 +97,17 @@ const apiLimiter = rateLimit({
     max: 60,                   // 60 requests per minute
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Too many requests. Slow down.' }
+    message: { error: 'Too many requests. Slow down.' },
+    store: new RedisStore({
+        sendCommand: (...args) => {
+            const client = store.getClient();
+            if (client) {
+                return client.call(...args);
+            }
+            logger.warn('Redis client not ready/available for API rate limiter, falling back to memory degradation mode');
+            return Promise.resolve();
+        }
+    })
 });
 
 // ── CSRF Protection (custom header check for API routes) ────────────────────
@@ -167,37 +147,6 @@ app.get('/api/auth/check', async (req, res) => {
     res.json({ authenticated: true, address: session.address });
 });
 
-// ─── Active Exchanges Sync (Authenticated & Real-time) ──────────────────────
-
-// Server-Sent Events (SSE) stream for real-time exchange list updates
-app.get('/api/exchanges/sync', authController.requireAuth, (req, res) => {
-    const address = req.user.address.toLowerCase();
-
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
-
-    // Send connection established event
-    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
-
-    const onUpdate = (exchanges) => {
-        res.write(`data: ${JSON.stringify({ type: 'update', exchanges })}\n\n`);
-    };
-
-    // Single global subscriber routes messages via localSyncEmitter (no per-client Redis connection)
-    localSyncEmitter.on('sync:' + address, onUpdate);
-
-    // Periodical heartbeats to maintain active connection and prevent timeouts
-    const heartbeat = setInterval(() => {
-        res.write(': heartbeat\n\n');
-    }, 15000);
-
-    req.on('close', () => {
-        clearInterval(heartbeat);
-        localSyncEmitter.removeListener('sync:' + address, onUpdate);
-    });
-});
 
 // GET currently active synced exchanges
 app.get('/api/exchanges/active', authController.requireAuth, async (req, res) => {
@@ -220,17 +169,6 @@ app.post('/api/exchanges/active', csrfProtect, authController.requireAuth, valid
         // Persist globally (uses Redis if available, falls back to memory)
         await store.set(`exchanges:active:${address}`, activeExchanges);
 
-        // Propagate locally (multi-tab sync in same node process)
-        localSyncEmitter.emit('sync:' + address, activeExchanges);
-
-        // Propagate globally (multi-device sync across different server instances)
-        if (redisPublisher) {
-            try {
-                await redisPublisher.publish(`user:exchanges:${address}`, JSON.stringify(activeExchanges));
-            } catch (err) {
-                logger.error('Redis Pub/Sub publish failed:', err.message);
-            }
-        }
 
         logger.info(`Synced ${activeExchanges.length} active exchanges for ${logger.maskAddress(address)}`);
         res.json({ success: true });

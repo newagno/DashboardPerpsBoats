@@ -159,6 +159,10 @@ class WalletManager {
      * @param {string|null} label - display label
      */
     addExchange(exchange, walletAddress = null, label = null) {
+        if (!this.state.isAuthenticated) {
+            alert(window.i18n ? window.i18n.t('please_login_first') : 'Please login (sign the message) first to add or sync exchanges.');
+            return { success: false, error: 'Not authenticated' };
+        }
         const addr = (walletAddress || this.state.address || '').toLowerCase();
         
         const entry = {
@@ -180,6 +184,10 @@ class WalletManager {
      * @param {string|null} label - display label
      */
     addVariationalManual(manualData, walletAddress = null, label = null) {
+        if (!this.state.isAuthenticated) {
+            alert(window.i18n ? window.i18n.t('please_login_first') : 'Please login (sign the message) first to add or sync exchanges.');
+            return { success: false, error: 'Not authenticated' };
+        }
         const entry = {
             id: crypto.randomUUID(), // collision-proof
             exchange: 'variational',
@@ -200,6 +208,10 @@ class WalletManager {
      * @param {string|null} walletAddress - specific wallet address
      */
     updateVariationalManual(id, manualData, walletAddress = null) {
+        if (!this.state.isAuthenticated) {
+            alert(window.i18n ? window.i18n.t('please_login_first') : 'Please login (sign the message) first to update or sync exchanges.');
+            return false;
+        }
         const entry = this.state.activeExchanges.find(e => e.id === id);
         if (!entry || entry.exchange !== 'variational') return false;
         entry.manualData = { ...manualData, inputDate: Date.now() };
@@ -213,6 +225,10 @@ class WalletManager {
      * Remove wallet entry by its unique id.
      */
     removeExchange(id) {
+        if (!this.state.isAuthenticated) {
+            alert(window.i18n ? window.i18n.t('please_login_first') : 'Please login (sign the message) first to remove exchanges.');
+            return;
+        }
         const entry = this.state.activeExchanges.find(e => e.id === id);
         this.state.activeExchanges = this.state.activeExchanges.filter(e => e.id !== id);
         this._saveExchanges();
@@ -432,31 +448,25 @@ class WalletManager {
         }
     }
 
-    /** Debounced push of local activeExchanges array to server. */
+    /** Debounced push of local activeExchanges array to server (Fire-and-forget). */
     async syncExchangesToBackend() {
         if (!this.state.isAuthenticated) return;
         
         clearTimeout(this._syncDebounceTimer);
-        return new Promise((resolve, reject) => {
-            this._syncDebounceTimer = setTimeout(async () => {
-                try {
-                    const r = await fetch('/api/exchanges/active', {
-                        method: 'POST',
-                        headers: this._csrfHeaders,
-                        body: JSON.stringify({ activeExchanges: this.state.activeExchanges })
-                    });
-                    if (r.ok) {
-                        resolve(true);
-                    } else {
-                        console.error('Failed to sync exchanges to backend: server returned status', r.status);
-                        reject(new Error(`Server error: ${r.status}`));
-                    }
-                } catch (e) {
-                    console.error('Failed to sync active exchanges to backend:', e);
-                    reject(e);
+        this._syncDebounceTimer = setTimeout(async () => {
+            try {
+                const r = await fetch('/api/exchanges/active', {
+                    method: 'POST',
+                    headers: this._csrfHeaders,
+                    body: JSON.stringify({ activeExchanges: this.state.activeExchanges })
+                });
+                if (!r.ok) {
+                    console.error('Failed to sync exchanges to backend: server returned status', r.status);
                 }
-            }, 300); // 300ms debounce window
-        });
+            } catch (e) {
+                console.error('Failed to sync active exchanges to backend:', e);
+            }
+        }, 300);
     }
 
     /** Setup Server-Sent Events (SSE) listener for real-time propagation of updates. */
@@ -482,11 +492,13 @@ class WalletManager {
                     const incomingStr = JSON.stringify(data.exchanges);
                     
                     if (localStr !== incomingStr) {
-                        this.state.activeExchanges = data.exchanges;
-                        localStorage.setItem('wallet_state_exchanges_v3', incomingStr);
+                        const merged = this.mergeExchanges(this.state.activeExchanges, data.exchanges);
+                        this.state.activeExchanges = merged;
+                        const mergedStr = JSON.stringify(merged);
+                        localStorage.setItem('wallet_state_exchanges_v3', mergedStr);
                         
                         // Dispatch custom event to notify dashboard UI to re-render
-                        const syncEvent = new CustomEvent('exchanges-synced', { detail: data.exchanges });
+                        const syncEvent = new CustomEvent('exchanges-synced', { detail: merged });
                         window.dispatchEvent(syncEvent);
                     }
                 }

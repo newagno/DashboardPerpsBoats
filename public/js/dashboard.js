@@ -320,7 +320,7 @@ class DashboardManager {
                 const errMsg = result?.error || (window.i18n ? window.i18n.t('please_login_first') : 'Auth error. Please connect wallet and sign.');
                 const vm = document.getElementById('wallet-addr-validation');
                 if (vm) { vm.textContent = '⚠ ' + errMsg; vm.classList.add('show'); }
-                else alert(errMsg);
+                alert("❌ [SAVE_EXCHANGE_FAILED]: " + errMsg);
                 return;
             }
             if (exc === 'extended') {

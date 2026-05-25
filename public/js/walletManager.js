@@ -104,21 +104,26 @@ class WalletManager {
                 if (event.data.event === 'MODAL_CLOSE' && !this.state.address) { }
             });
             window.appKit.subscribeAccount(account => {
-                if (account.isConnected && account.address !== this.state.address) {
-                    this.state.address = account.address;
-                    localStorage.setItem('wallet_state_address', account.address);
+                if (account.isConnected) {
+                    const isNewAddr = account.address !== this.state.address;
+                    if (isNewAddr) {
+                        this.state.address = account.address;
+                        localStorage.setItem('wallet_state_address', account.address);
+                    }
 
-                    // Re-validate session when account changes
-                    this.checkSession().then((isValid) => {
-                        if (isValid) {
-                            this.syncExchangesWithBackend();
-                        } else {
-                            // Session missing or expired (e.g. cleared cache). Prompt for signature to authenticate and sync.
-                            this.loginToBackend().catch(err => {
-                                console.error('Login signature rejected or failed:', err);
-                            });
-                        }
-                    });
+                    // Re-validate session if not authenticated or if the address changed
+                    if (!this.state.isAuthenticated || isNewAddr) {
+                        this.checkSession().then((isValid) => {
+                            if (isValid) {
+                                this.syncExchangesWithBackend();
+                            } else {
+                                // Session missing or expired. Prompt for signature to authenticate and sync.
+                                this.loginToBackend().catch(err => {
+                                    console.error('Login signature rejected or failed:', err);
+                                });
+                            }
+                        });
+                    }
                 } else if (!account.isConnected && this.state.address) {
                     this.disconnect();
                 }
@@ -188,15 +193,47 @@ class WalletManager {
      * @param {string|null} label - display label
      * @param {boolean} bypassAuth - if true, skips signatures / auth check (e.g. for Nado)
      */
+    isWalletConnected() {
+        try {
+            if (!this.state.address) return false;
+            
+            // Check standard injected provider first as a highly reliable indicator
+            if (window.ethereum && window.ethereum.selectedAddress) {
+                if (window.ethereum.selectedAddress.toLowerCase() === this.state.address.toLowerCase()) {
+                    return true;
+                }
+            }
+
+            if (!window.appKit) return false;
+            // Check if AppKit reports connected state
+            if (typeof window.appKit.getIsConnected === 'function') {
+                if (!window.appKit.getIsConnected()) return false;
+            }
+            // Check if provider is actually available
+            if (typeof window.appKit.getWalletProvider === 'function') {
+                if (!window.appKit.getWalletProvider() && !window.ethereum) return false;
+            }
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * Add a wallet entry.
+     * @param {string} exchange - 'extended' | 'nado'
+     * @param {string|null} walletAddress - specific wallet address (null = use session address)
+     * @param {string|null} label - display label
+     * @param {boolean} bypassAuth - if true, skips signatures / auth check (e.g. for Nado)
+     */
     async addExchange(exchange, walletAddress = null, label = null, bypassAuth = false) {
         if (!bypassAuth && exchange !== 'nado' && !this.state.isAuthenticated) {
-            const isWalletConnected = !!this.state.address;
-            if (isWalletConnected) {
-                try { await this.loginToBackend(); } catch (e) { return { success: false, error: 'Login cancelled' }; }
+            if (this.isWalletConnected()) {
+                try { await this.loginToBackend(); } catch (e) { return { success: false, error: e.message || 'Login cancelled' }; }
             } else {
-                await this.connectMetaMask();
-                if (this.state.address) {
-                    try { await this.loginToBackend(); } catch (e) { return { success: false, error: 'Login cancelled' }; }
+                const connected = await this.connectMetaMask();
+                if (connected && this.isWalletConnected()) {
+                    try { await this.loginToBackend(); } catch (e) { return { success: false, error: e.message || 'Login cancelled' }; }
                 } else {
                     return { success: false, error: 'Wallet not connected' };
                 }
@@ -224,11 +261,15 @@ class WalletManager {
      */
     async addVariationalManual(manualData, walletAddress = null, label = null) {
         if (!this.state.isAuthenticated) {
-            if (this.state.address) {
-                try { await this.loginToBackend(); } catch (e) { return { success: false, error: 'Login cancelled' }; }
+            if (this.isWalletConnected()) {
+                try { await this.loginToBackend(); } catch (e) { return { success: false, error: e.message || 'Login cancelled' }; }
             } else {
-                await this.connectMetaMask();
-                try { await this.loginToBackend(); } catch (e) { return { success: false, error: 'Login cancelled' }; }
+                const connected = await this.connectMetaMask();
+                if (connected && this.isWalletConnected()) {
+                    try { await this.loginToBackend(); } catch (e) { return { success: false, error: e.message || 'Login cancelled' }; }
+                } else {
+                    return { success: false, error: 'Wallet not connected' };
+                }
             }
         }
         const entry = {
@@ -252,11 +293,15 @@ class WalletManager {
      */
     async updateVariationalManual(id, manualData, walletAddress = null) {
         if (!this.state.isAuthenticated) {
-            if (this.state.address) {
+            if (this.isWalletConnected()) {
                 try { await this.loginToBackend(); } catch (e) { return false; }
             } else {
-                await this.connectMetaMask();
-                try { await this.loginToBackend(); } catch (e) { return false; }
+                const connected = await this.connectMetaMask();
+                if (connected && this.isWalletConnected()) {
+                    try { await this.loginToBackend(); } catch (e) { return false; }
+                } else {
+                    return false;
+                }
             }
         }
         const entry = this.state.activeExchanges.find(e => e.id === id);
@@ -276,12 +321,11 @@ class WalletManager {
 
         // Перевірка прав (якщо це не Nado та не Variational, вимагаємо авторизацію)
         if (entry && entry.exchange !== 'nado' && entry.exchange !== 'variational' && !this.state.isAuthenticated) {
-            const isWalletConnected = !!this.state.address;
-            if (isWalletConnected) {
+            if (this.isWalletConnected()) {
                 try { await this.loginToBackend(); } catch (e) { return; }
             } else {
-                await this.connectMetaMask();
-                if (this.state.address) {
+                const connected = await this.connectMetaMask();
+                if (connected && this.isWalletConnected()) {
                     try { await this.loginToBackend(); } catch (e) { return; }
                 } else {
                     return;
@@ -358,7 +402,16 @@ class WalletManager {
                 ]
             };
 
-            const provider = new ethers.providers.Web3Provider(window.appKit.getWalletProvider());
+            let rawProvider = null;
+            if (window.appKit && typeof window.appKit.getWalletProvider === 'function') {
+                rawProvider = window.appKit.getWalletProvider();
+            }
+            if (!rawProvider) {
+                rawProvider = window.ethereum;
+            }
+            if (!rawProvider) throw new Error("Wallet provider not found. Please make sure MetaMask is installed.");
+
+            const provider = new ethers.providers.Web3Provider(rawProvider);
             const network = await provider.getNetwork().catch(() => ({ chainId: 1 }));
             const chainIdNum = network.chainId || 1;
             

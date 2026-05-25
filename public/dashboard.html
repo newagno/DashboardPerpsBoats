@@ -14,6 +14,30 @@
     <link rel="stylesheet" href="css/dashboard.css">
 </head>
 <body class="dashboard-body">
+    <!-- Runtime Error Visual Console (Helpful for debugging on user devices) -->
+    <div id="debug-error-bar" style="display:none; position:fixed; top:0; left:0; width:100%; background:rgba(220,53,69,0.95); color:white; padding:15px; z-index:999999; font-family:monospace; font-size:14px; border-bottom:3px solid #ff4836; box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+        <strong style="font-size:16px;">⚠️ [RUNTIME_ERROR]:</strong> 
+        <span id="debug-error-message"></span>
+        <button onclick="this.parentElement.style.display='none'" style="float:right; background:none; border:1px solid white; color:white; cursor:pointer; padding:2px 8px; font-weight:bold;">CLOSE</button>
+    </div>
+    <script>
+        window.addEventListener('error', function(event) {
+            const bar = document.getElementById('debug-error-bar');
+            const span = document.getElementById('debug-error-message');
+            if (bar && span) {
+                span.innerHTML = event.message + ' at ' + (event.filename ? event.filename.split('/').pop() : 'inline') + ':' + event.lineno;
+                bar.style.display = 'block';
+            }
+        });
+        window.addEventListener('unhandledrejection', function(event) {
+            const bar = document.getElementById('debug-error-bar');
+            const span = document.getElementById('debug-error-message');
+            if (bar && span) {
+                span.innerHTML = 'Promise Rejection: ' + (event.reason ? event.reason.message || event.reason : 'Unknown reason');
+                bar.style.display = 'block';
+            }
+        });
+    </script>
     <!-- Particle Background -->
     <canvas id="particle-canvas"></canvas>
     <div class="app-container">
@@ -261,9 +285,9 @@
     <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
     <!-- 2. AppKit (module, depends on ethers being global) -->
     <script type="module">
-        import { createAppKit } from 'https://esm.run/@reown/appkit'
-        import { EthersAdapter } from 'https://esm.run/@reown/appkit-adapter-ethers'
-        import { mainnet, arbitrum } from 'https://esm.run/@reown/appkit/networks'
+        import { createAppKit } from 'https://esm.sh/@reown/appkit'
+        import { Ethers5Adapter } from 'https://esm.sh/@reown/appkit-adapter-ethers5'
+        import { mainnet, arbitrum } from 'https://esm.sh/@reown/appkit/networks'
 
         const projectId = '8e391307b22a0129f957df38fc05167a'
 
@@ -275,7 +299,7 @@
         }
 
         const appKit = createAppKit({
-            adapters: [new EthersAdapter()],
+            adapters: [new Ethers5Adapter()],
             networks: [mainnet, arbitrum],
             metadata,
             projectId,

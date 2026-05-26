@@ -115,18 +115,11 @@ class DashboardManager {
         this.setupEventListeners();
 
         if (!window.walletManager) {
-            console.error("WalletManager is not ready yet!");
+            console.error('WalletManager is not ready yet!');
             return;
         }
 
-        // Wait for session check and cross-device exchange synchronization
-        if (window.walletManager && typeof window.walletManager.checkSession === 'function') {
-            await window.walletManager.checkSession();
-            if (window.walletManager.state.isAuthenticated) {
-                await window.walletManager.syncExchangesWithBackend();
-            }
-        }
-
+        // Local-first: read exchanges directly from walletManager (localStorage)
         const hasExchanges = window.walletManager.state.activeExchanges.length > 0;
         if (hasExchanges) {
             this.renderLoading();
@@ -136,7 +129,6 @@ class DashboardManager {
         }
 
         window.addEventListener('languageChanged', () => {
-            // Re-render empty state or refresh existing cards with new language
             if (window.walletManager.state.activeExchanges.length === 0) {
                 this.walletsContainer.innerHTML = `<div class="empty-state"><p>${window.i18n ? window.i18n.t('no_exchange_configured') : 'NO ACTIVE EXCHANGE CONFIGURED. CLICK "ADD_EXCHANGE" TO INITIALIZE.'}</p></div>`;
             } else {
@@ -146,25 +138,16 @@ class DashboardManager {
             }
         });
 
-        // Listen for Server-Sent Events (SSE) active exchanges updates
+        // Listen for cross-tab BroadcastChannel updates from walletManager
         window.addEventListener('exchanges-synced', (e) => {
-            console.log('UI caught exchanges-synced event. Re-rendering...');
             const exchanges = e.detail;
-
-            // Map the synced exchanges to their current display states
             const cardsData = exchanges.map(exc => {
-                // If we already have loaded data in memory for this exchange id, keep it
                 const existingData = this.walletData[exc.id];
-                if (existingData) {
-                    return { ...exc, success: true, data: existingData };
-                } else {
-                    return { ...exc, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...' };
-                }
+                return existingData
+                    ? { ...exc, success: true, data: existingData }
+                    : { ...exc, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...' };
             });
-
             this.updateAllWalletCards(cardsData);
-
-            // Trigger a silent background refresh to load any missing/newly added exchange stats
             window.refreshEngine.refresh();
         });
     }
@@ -173,18 +156,10 @@ class DashboardManager {
 
     setupEventListeners() {
         this.btnAddExchange.addEventListener('click', () => {
-            // If walletManager isn't ready yet, wait a moment before proceeding
-            // Reset modal fields before showing
             this.exchangeSelect.value = '';
             const addrInput = document.getElementById('wallet-address-input');
             const labelInput = document.getElementById('wallet-label-input');
-            if (addrInput) {
-                addrInput.value = '';
-                // Pre-fill with connected wallet address if available
-                if (window.walletManager && window.walletManager.state.address) {
-                    addrInput.value = window.walletManager.state.address;
-                }
-            }
+            if (addrInput) addrInput.value = '';
             if (labelInput) labelInput.value = '';
             this.extendedConfigGroup.style.display = 'none';
             document.getElementById('multi-wallet-group').style.display = 'none';
@@ -257,11 +232,7 @@ class DashboardManager {
                     };
 
                     console.log('➕ Adding Variational:', { manualData, walletAddress, label });
-                    const result = await window.walletManager.addVariationalManual(manualData, walletAddress, label)
-                        .catch(e => {
-                            console.error('❌ Variational error:', e);
-                            return { success: false, error: e.message };
-                        });
+                    const result = window.walletManager.addVariationalManual(manualData, walletAddress, label);
 
                     if (!result?.success) {
                         alert('❌ Error: ' + (result?.error || 'Failed to add'));
@@ -310,54 +281,9 @@ class DashboardManager {
                     return e.exchange === exc && eAddr === finalAddr;
                 });
 
-                if (isDup) {
-                    alert('⚠️ This wallet is already added for ' + exc);
-                    return;
-                }
-
-                // 🔴 CRITICAL: Extended requires authentication BEFORE addExchange
-                if (exc === 'extended' && !window.walletManager.state.isAuthenticated) {
-                    console.log('⚠️ Extended requires authentication, connecting wallet...');
-                    this.btnSaveExchange.disabled = true;
-                    this.btnSaveExchange.textContent = 'Connecting Wallet...';
-
-                    try {
-                        // Step 1: Connect MetaMask
-                        const connected = await window.walletManager.connectMetaMask();
-                        if (!connected) {
-                            alert('❌ MetaMask connection failed. Please connect your wallet and try again.');
-                            this.btnSaveExchange.disabled = false;
-                            this.btnSaveExchange.textContent = 'Add Exchange';
-                            return;
-                        }
-
-                        this.btnSaveExchange.textContent = 'Signing Message...';
-
-                        // Step 2: Sign and authenticate
-                        await window.walletManager.loginToBackend();
-                        console.log('✅ Authentication successful');
-
-                    } catch (e) {
-                        console.error('❌ Authentication failed:', e);
-                        alert('❌ Authentication failed: ' + e.message);
-                        this.btnSaveExchange.disabled = false;
-                        this.btnSaveExchange.textContent = 'Add Exchange';
-                        return;
-                    }
-
-                    this.btnSaveExchange.disabled = false;
-                    this.btnSaveExchange.textContent = 'Add Exchange';
-                }
-
                 console.log('➕ Adding exchange:', { exc, finalAddr });
 
-                // bypassAuth only for Nado
-                const bypassAuth = (exc === 'nado');
-                const result = await window.walletManager.addExchange(exc, finalAddr, label, bypassAuth)
-                    .catch(e => {
-                        console.error('❌ Exchange error:', e);
-                        return { success: false, error: e.message };
-                    });
+                const result = window.walletManager.addExchange(exc, finalAddr, label);
 
                 if (!result?.success) {
                     alert('❌ Error: ' + (result?.error || 'Failed to add'));

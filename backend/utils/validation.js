@@ -28,28 +28,6 @@ const apiKeyString = z.string()
 
 // ── Route-specific schemas ────────────────────────────────────────────────────
 
-const nonceQuerySchema = z.object({
-    address: ethereumAddress
-});
-
-const verifyBodySchema = z.object({
-    address: ethereumAddress,
-    signature: z.string().min(1, 'Signature required'),
-    message: z.object({
-        intent: z.literal('Login to Dashboard'),
-        address: z.string(),
-        nonce: z.string().uuid('Invalid nonce format'),
-        timestamp: z.number().int().positive()
-    }),
-    chainId: z.union([
-        z.string().regex(/^0x[a-fA-F0-9]+$/, 'Invalid hex chainId'),
-        z.number().int().positive()
-    ])
-});
-
-const extendedStatsSchema = z.object({
-    apiKey: apiKeyString
-});
 
 const nadoStatsSchema = z.object({
     address: starknetOrEthAddress.optional().nullable(),
@@ -93,25 +71,6 @@ const extendedEntryIdSchema = z.object({
     entryId: entryId
 });
 
-const activeExchangesSchema = z.object({
-    activeExchanges: z.array(z.object({
-        id: z.string().min(1).max(128),
-        exchange: z.enum(['extended', 'nado', 'variational']),
-        walletAddress: z.string().regex(/^0x[a-fA-F0-9]{40,66}$/, 'Invalid wallet address format').nullable().optional(),
-        label: z.string().min(1).max(100).nullable().optional(),
-        updatedAt: z.string().datetime().optional().nullable(),
-        manualData: z.object({
-            initDeposit: z.number().nonnegative().optional(),
-            actDeposit: z.number().nonnegative().optional(),
-            volume: z.number().nonnegative().optional(),
-            points: z.number().nonnegative().optional(),
-            rank: z.string().max(32).nullable().optional(),
-            winRate: z.number().min(0).max(100).optional(),
-            roi: z.number().optional(),
-            inputDate: z.number().int().positive().optional()
-        }).nullable().optional()
-    }))
-});
 
 // ── Middleware factory ────────────────────────────────────────────────────────
 
@@ -136,17 +95,13 @@ const validate = (schema, source = 'body') => (req, res, next) => {
 
 module.exports = {
     schemas: {
-        nonceQuerySchema,
-        verifyBodySchema,
-        extendedStatsSchema,
         extendedEntryIdSchema,
         nadoStatsSchema,
         nadoSyncSchema,
         variationalStatsSchema,
         storeKeySchema,
         keyCheckQuerySchema,
-        keyRemoveBodySchema,
-        activeExchangesSchema
+        keyRemoveBodySchema
     },
     validate
 };

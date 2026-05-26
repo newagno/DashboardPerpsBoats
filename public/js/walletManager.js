@@ -1,10 +1,13 @@
 /**
- * WalletManager — handles MetaMask connection, local UI state persistence,
- * EIP-712 Session Authentication, and real-time backend synchronization.
+ * WalletManager — local-first state manager for active exchange entries.
+ * Stores activeExchanges exclusively in localStorage (wallet_state_exchanges_v3).
+ * No Web3, no MetaMask, no EIP-712. API keys for Extended/Variational are
+ * stored in server-side HttpOnly cookies via /api/exchanges/keys/*.
  *
- * Multi-wallet: activeExchanges is now an array of objects:
+ * Multi-wallet: activeExchanges is an array of objects:
  *   { id, exchange, walletAddress, label, updatedAt, manualData }
  */
+
 // Safe UUID generator — works in HTTPS and HTTP (local IP / test envs)
 const _generateId = () =>
     (typeof crypto !== 'undefined' && crypto.randomUUID)
@@ -14,10 +17,7 @@ const _generateId = () =>
 class WalletManager {
     constructor() {
         this.state = {
-            address: null,
-            chainId: null,
-            activeExchanges: [], // Array of { id, exchange, walletAddress, label, updatedAt, manualData }
-            isAuthenticated: false
+            activeExchanges: [] // Array of { id, exchange, walletAddress, label, updatedAt, manualData }
         };
 
         // CSRF header for all backend POST requests
@@ -26,29 +26,15 @@ class WalletManager {
             'X-Requested-With': 'TradeDash'
         };
 
-        this.DOMAIN_BASE = {
-            name: 'TradeDash',
-            version: '2.0',
-            verifyingContract: '0x0000000000000000000000000000000000000000'
-        };
-
-        this._syncDebounceTimer = null;
-
-        // Establish native BroadcastChannel for cross-tab synchronization
+        // Cross-tab synchronization via BroadcastChannel
         this._syncChannel = new BroadcastChannel('wallet_state_sync');
         this._syncChannel.onmessage = (event) => {
             if (event.data && event.data.type === 'EXCHANGES_UPDATED' && event.data.payload) {
-                console.log('BroadcastChannel: Received activeExchanges update from another tab');
-
-                // Compare before updating to prevent infinite redraw loops
                 const localStr = JSON.stringify(this.state.activeExchanges);
                 const incomingStr = JSON.stringify(event.data.payload);
                 if (localStr !== incomingStr) {
                     this.state.activeExchanges = event.data.payload;
-
-                    // Dispatch custom event to notify dashboard UI to re-render
-                    const syncEvent = new CustomEvent('exchanges-synced', { detail: event.data.payload });
-                    window.dispatchEvent(syncEvent);
+                    window.dispatchEvent(new CustomEvent('exchanges-synced', { detail: event.data.payload }));
                 }
             }
         };
@@ -57,19 +43,12 @@ class WalletManager {
     }
 
     init() {
-        const savedAddress = localStorage.getItem('wallet_state_address');
-        const savedChainId = localStorage.getItem('wallet_state_chainId');
         const savedExchanges = localStorage.getItem('wallet_state_exchanges_v3');
-
-        if (savedAddress) {
-            this.state.address = savedAddress;
-            this.state.chainId = savedChainId;
-        }
 
         if (savedExchanges) {
             try { this.state.activeExchanges = JSON.parse(savedExchanges); } catch (e) { }
         } else {
-            // Migrate old string-array format
+            // One-time migration from old string-array format
             const oldEx = localStorage.getItem('wallet_state_exchanges');
             if (oldEx) {
                 try {
@@ -77,7 +56,7 @@ class WalletManager {
                     this.state.activeExchanges = old.map(exc => ({
                         id: exc + '_' + Date.now() + '_' + Math.random().toString(36).slice(2),
                         exchange: exc,
-                        walletAddress: null, // will use session address
+                        walletAddress: null,
                         label: exc.charAt(0).toUpperCase() + exc.slice(1),
                         updatedAt: new Date(0).toISOString()
                     }));
@@ -86,7 +65,7 @@ class WalletManager {
             }
         }
 
-        // One-time migration: remove old vault data
+        // One-time migration: remove stale vault/encrypted keys from localStorage
         if (!localStorage.getItem('migration_v3_done')) {
             const toRemove = [];
             for (let i = 0; i < localStorage.length; i++) {
@@ -98,37 +77,6 @@ class WalletManager {
             toRemove.forEach(k => localStorage.removeItem(k));
             localStorage.setItem('migration_v3_done', 'true');
         }
-
-        this.waitForAppKit().then(() => {
-            window.appKit.subscribeEvents(event => {
-                if (event.data.event === 'MODAL_CLOSE' && !this.state.address) { }
-            });
-            window.appKit.subscribeAccount(account => {
-                if (account.isConnected) {
-                    const isNewAddr = account.address !== this.state.address;
-                    if (isNewAddr) {
-                        this.state.address = account.address;
-                        localStorage.setItem('wallet_state_address', account.address);
-                    }
-
-                    // Re-validate session if not authenticated or if the address changed
-                    if (!this.state.isAuthenticated || isNewAddr) {
-                        this.checkSession().then((isValid) => {
-                            if (isValid) {
-                                this.syncExchangesWithBackend();
-                            } else {
-                                // Session missing or expired. Prompt for signature to authenticate and sync.
-                                this.loginToBackend().catch(err => {
-                                    console.error('Login signature rejected or failed:', err);
-                                });
-                            }
-                        });
-                    }
-                } else if (!account.isConnected && this.state.address) {
-                    this.disconnect();
-                }
-            });
-        });
     }
 
     _saveExchanges() {
@@ -139,17 +87,12 @@ class WalletManager {
                 payload: this.state.activeExchanges
             });
         }
-        if (this.state.isAuthenticated) {
-            this.syncExchangesToBackend().catch(err => console.error('Failed to save exchanges to server:', err));
-        }
     }
 
-    async waitForAppKit() {
-        while (!window.appKit) await new Promise(r => setTimeout(r, 100));
-    }
+    // ── HttpOnly Cookie API Key Management ────────────────────────────────────
 
+    /** Store Extended API key in HttpOnly cookie via backend. Key is NOT kept in memory. */
     setExtendedApiKey(id, key) {
-        // Store in HttpOnly cookie via backend. Key is NOT kept in memory.
         return fetch('/api/exchanges/keys/store', {
             method: 'POST',
             headers: this._csrfHeaders,
@@ -167,8 +110,8 @@ class WalletManager {
         } catch (e) { return false; }
     }
 
+    /** Store Variational token in HttpOnly cookie via backend. Token is NOT kept in memory. */
     setVariationalToken(id, token) {
-        // Store in HttpOnly cookie via backend. Token is NOT kept in memory.
         return fetch('/api/exchanges/keys/store', {
             method: 'POST',
             headers: this._csrfHeaders,
@@ -186,65 +129,20 @@ class WalletManager {
         } catch (e) { return false; }
     }
 
-    /**
-     * Add a wallet entry.
-     * @param {string} exchange - 'extended' | 'nado'
-     * @param {string|null} walletAddress - specific wallet address (null = use session address)
-     * @param {string|null} label - display label
-     * @param {boolean} bypassAuth - if true, skips signatures / auth check (e.g. for Nado)
-     */
-    isWalletConnected() {
-        try {
-            if (!this.state.address) return false;
-            
-            // Check standard injected provider first as a highly reliable indicator
-            if (window.ethereum && window.ethereum.selectedAddress) {
-                if (window.ethereum.selectedAddress.toLowerCase() === this.state.address.toLowerCase()) {
-                    return true;
-                }
-            }
-
-            if (!window.appKit) return false;
-            // Check if AppKit reports connected state
-            if (typeof window.appKit.getIsConnected === 'function') {
-                if (!window.appKit.getIsConnected()) return false;
-            }
-            // Check if provider is actually available
-            if (typeof window.appKit.getWalletProvider === 'function') {
-                if (!window.appKit.getWalletProvider() && !window.ethereum) return false;
-            }
-            return true;
-        } catch (e) {
-            return false;
-        }
-    }
+    // ── Exchange CRUD ─────────────────────────────────────────────────────────
 
     /**
      * Add a wallet entry.
-     * @param {string} exchange - 'extended' | 'nado'
-     * @param {string|null} walletAddress - specific wallet address (null = use session address)
+     * @param {string} exchange - 'extended' | 'nado' | 'variational'
+     * @param {string|null} walletAddress - specific wallet address
      * @param {string|null} label - display label
-     * @param {boolean} bypassAuth - if true, skips signatures / auth check (e.g. for Nado)
      */
-    async addExchange(exchange, walletAddress = null, label = null, bypassAuth = false) {
-        if (!bypassAuth && exchange !== 'nado' && !this.state.isAuthenticated) {
-            if (this.isWalletConnected()) {
-                try { await this.loginToBackend(); } catch (e) { return { success: false, error: e.message || 'Login cancelled' }; }
-            } else {
-                const connected = await this.connectMetaMask();
-                if (connected && this.isWalletConnected()) {
-                    try { await this.loginToBackend(); } catch (e) { return { success: false, error: e.message || 'Login cancelled' }; }
-                } else {
-                    return { success: false, error: 'Wallet not connected' };
-                }
-            }
-        }
-        const addr = (walletAddress || this.state.address || '').toLowerCase();
-
+    addExchange(exchange, walletAddress = null, label = null) {
+        const addr = (walletAddress || '').toLowerCase() || null;
         const entry = {
             id: _generateId(),
             exchange,
-            walletAddress: addr || null,
+            walletAddress: addr,
             label: label || (exchange.charAt(0).toUpperCase() + exchange.slice(1)),
             updatedAt: new Date().toISOString()
         };
@@ -255,23 +153,11 @@ class WalletManager {
 
     /**
      * Add a Variational exchange entry with manual data.
-     * @param {object} manualData - { initDeposit, actDeposit, volume, points, rank }
-     * @param {string|null} walletAddress - specific wallet address
+     * @param {object} manualData - { initDeposit, actDeposit, volume, points, rank, winRate, roi }
+     * @param {string|null} walletAddress - optional wallet address
      * @param {string|null} label - display label
      */
-    async addVariationalManual(manualData, walletAddress = null, label = null) {
-        if (!this.state.isAuthenticated) {
-            if (this.isWalletConnected()) {
-                try { await this.loginToBackend(); } catch (e) { return { success: false, error: e.message || 'Login cancelled' }; }
-            } else {
-                const connected = await this.connectMetaMask();
-                if (connected && this.isWalletConnected()) {
-                    try { await this.loginToBackend(); } catch (e) { return { success: false, error: e.message || 'Login cancelled' }; }
-                } else {
-                    return { success: false, error: 'Wallet not connected' };
-                }
-            }
-        }
+    addVariationalManual(manualData, walletAddress = null, label = null) {
         const entry = {
             id: _generateId(),
             exchange: 'variational',
@@ -288,22 +174,10 @@ class WalletManager {
     /**
      * Update manual data for an existing Variational entry.
      * @param {string} id - entry id
-     * @param {object} manualData - { initDeposit, actDeposit, volume, points, rank }
-     * @param {string|null} walletAddress - specific wallet address
+     * @param {object} manualData - updated stats
+     * @param {string|null} walletAddress - optional updated wallet address
      */
-    async updateVariationalManual(id, manualData, walletAddress = null) {
-        if (!this.state.isAuthenticated) {
-            if (this.isWalletConnected()) {
-                try { await this.loginToBackend(); } catch (e) { return false; }
-            } else {
-                const connected = await this.connectMetaMask();
-                if (connected && this.isWalletConnected()) {
-                    try { await this.loginToBackend(); } catch (e) { return false; }
-                } else {
-                    return false;
-                }
-            }
-        }
+    updateVariationalManual(id, manualData, walletAddress = null) {
         const entry = this.state.activeExchanges.find(e => e.id === id);
         if (!entry || entry.exchange !== 'variational') return false;
         entry.manualData = { ...manualData, inputDate: Date.now() };
@@ -314,29 +188,16 @@ class WalletManager {
     }
 
     /**
-     * Remove wallet entry by its unique id.
+     * Remove an exchange entry by its unique id.
+     * Also removes the associated HttpOnly cookie if Extended or Variational.
+     * @param {string} id - entry id
      */
-    async removeExchange(id) {
-        const entry = this.state.activeExchanges.find(e => e.id === id); // Одне оголошення
-
-        // Перевірка прав (якщо це не Nado та не Variational, вимагаємо авторизацію)
-        if (entry && entry.exchange !== 'nado' && entry.exchange !== 'variational' && !this.state.isAuthenticated) {
-            if (this.isWalletConnected()) {
-                try { await this.loginToBackend(); } catch (e) { return; }
-            } else {
-                const connected = await this.connectMetaMask();
-                if (connected && this.isWalletConnected()) {
-                    try { await this.loginToBackend(); } catch (e) { return; }
-                } else {
-                    return;
-                }
-            }
-        }
-
+    removeExchange(id) {
+        const entry = this.state.activeExchanges.find(e => e.id === id);
         this.state.activeExchanges = this.state.activeExchanges.filter(e => e.id !== id);
         this._saveExchanges();
+
         if (entry?.exchange === 'extended') {
-            // Remove HttpOnly cookie via backend
             fetch('/api/exchanges/keys/remove', {
                 method: 'POST',
                 headers: this._csrfHeaders,
@@ -345,7 +206,6 @@ class WalletManager {
             }).catch(() => { });
         }
         if (entry?.exchange === 'variational') {
-            // Remove HttpOnly cookie via backend
             fetch('/api/exchanges/keys/remove', {
                 method: 'POST',
                 headers: this._csrfHeaders,
@@ -354,234 +214,6 @@ class WalletManager {
             }).catch(() => { });
         }
     }
-
-    async connectMetaMask() {
-        await this.waitForAppKit();
-        try {
-            await window.appKit.open();
-            let timeout = 60000, start = Date.now();
-            while (!this.state.address && (Date.now() - start < timeout)) {
-                await new Promise(r => setTimeout(r, 500));
-            }
-            if (this.state.address) {
-                return true;
-            }
-            return false;
-        } catch (error) {
-            console.error('AppKit connection failed:', error);
-            return false;
-        }
-    }
-
-    async loginToBackend() {
-        if (!this.state.address) throw new Error("Wallet not connected");
-        try {
-            const nonceRes = await fetch(`/api/auth/nonce?address=${this.state.address}`);
-            if (!nonceRes.ok) throw new Error("Failed to fetch nonce");
-            const { nonce } = await nonceRes.json();
-
-            const message = {
-                intent: 'Login to Dashboard',
-                address: this.state.address,
-                nonce,
-                timestamp: Math.floor(Date.now() / 1000)
-            };
-
-            const types = {
-                EIP712Domain: [
-                    { name: 'name', type: 'string' },
-                    { name: 'version', type: 'string' },
-                    { name: 'chainId', type: 'uint256' },
-                    { name: 'verifyingContract', type: 'address' }
-                ],
-                Login: [
-                    { name: 'intent', type: 'string' },
-                    { name: 'address', type: 'address' },
-                    { name: 'nonce', type: 'string' },
-                    { name: 'timestamp', type: 'uint256' }
-                ]
-            };
-
-            let rawProvider = null;
-            if (window.appKit && typeof window.appKit.getWalletProvider === 'function') {
-                rawProvider = window.appKit.getWalletProvider();
-            }
-            if (!rawProvider) {
-                rawProvider = window.ethereum;
-            }
-            if (!rawProvider) throw new Error("Wallet provider not found. Please make sure MetaMask is installed.");
-
-            const provider = new ethers.providers.Web3Provider(rawProvider);
-            const network = await provider.getNetwork().catch(() => ({ chainId: 1 }));
-            const chainIdNum = network.chainId || 1;
-            
-            this.state.chainId = '0x' + chainIdNum.toString(16);
-            localStorage.setItem('wallet_state_chainId', this.state.chainId);
-
-            const signer = provider.getSigner();
-            const domain = { ...this.DOMAIN_BASE, chainId: chainIdNum };
-            const finalTypes = { ...types };
-            delete finalTypes.EIP712Domain;
-
-            const signature = await signer._signTypedData(domain, { Login: types.Login }, message);
-
-            const verifyRes = await fetch('/api/auth/verify', {
-                method: 'POST',
-                headers: this._csrfHeaders,
-                credentials: 'include',
-                body: JSON.stringify({ address: this.state.address, signature, message, chainId: this.state.chainId })
-            });
-
-            if (!verifyRes.ok) throw new Error("Session verification failed");
-
-            this.state.isAuthenticated = true;
-            await this.syncExchangesWithBackend();
-            return true;
-        } catch (e) {
-            console.error("Auth flow error:", e);
-            throw e;
-        }
-    }
-
-    async logoutBackend() {
-        try { await fetch('/api/auth/logout', { method: 'POST', headers: this._csrfHeaders, credentials: 'include' }); } catch (e) { }
-    }
-
-    disconnect() {
-        this.logoutBackend();
-        this.state.address = null;
-        this.state.chainId = null;
-        this.state.isAuthenticated = false;
-        if (this._syncChannel) {
-            this._syncChannel.close();
-        }
-        localStorage.removeItem('wallet_state_address');
-        localStorage.removeItem('wallet_state_chainId');
-        window.location.reload();
-    }
-
-    // ─── Robust Synchronization Strategies ─────────────────────────────────────
-
-    /** Query check session endpoint on app load. Sets isAuthenticated flag. */
-    async checkSession() {
-        try {
-            const r = await fetch('/api/auth/check');
-            const data = await r.json();
-            if (data.authenticated && data.address) {
-                this.state.address = data.address;
-                this.state.isAuthenticated = true;
-                localStorage.setItem('wallet_state_address', data.address);
-                return true;
-            }
-        } catch (e) {
-            console.error('Session check failed:', e);
-        }
-        this.state.isAuthenticated = false;
-        return false;
-    }
-
-    /**
-     * Smart Merge algorithm that deduplicates local vs backend exchanges array,
-     * resolving conflicts using the latest updatedAt timestamp.
-     */
-    mergeExchanges(local, backend) {
-        const mergedMap = new Map();
-
-        const getTimestamp = (isoStr) => {
-            if (!isoStr) return 0;
-            const t = Date.parse(isoStr);
-            return isNaN(t) ? 0 : t;
-        };
-
-        // Populate local entries
-        local.forEach(item => {
-            if (!item.id) return;
-            if (!item.updatedAt) {
-                item.updatedAt = new Date(0).toISOString();
-            }
-            mergedMap.set(item.id, item);
-        });
-
-        // Merge backend entries
-        backend.forEach(item => {
-            if (!item.id) return;
-            if (!item.updatedAt) {
-                item.updatedAt = new Date(0).toISOString();
-            }
-
-            if (mergedMap.has(item.id)) {
-                const existing = mergedMap.get(item.id);
-                const localTime = getTimestamp(existing.updatedAt);
-                const backendTime = getTimestamp(item.updatedAt);
-
-                if (backendTime >= localTime) {
-                    mergedMap.set(item.id, item);
-                }
-            } else {
-                mergedMap.set(item.id, item);
-            }
-        });
-
-        return Array.from(mergedMap.values());
-    }
-
-    /** Fetch exchanges from server and merge them with local storage using Smart Merge. */
-    async syncExchangesWithBackend() {
-        if (!this.state.isAuthenticated) return;
-        try {
-            const r = await fetch('/api/exchanges/active');
-            if (r.ok) {
-                const backendExchanges = await r.json();
-                if (Array.isArray(backendExchanges)) {
-                    const localExchanges = this.state.activeExchanges;
-
-                    // Smart merge logic
-                    const merged = this.mergeExchanges(localExchanges, backendExchanges);
-
-                    this.state.activeExchanges = merged;
-                    localStorage.setItem('wallet_state_exchanges_v3', JSON.stringify(merged));
-
-                    // Dispatch custom event to notify dashboard UI to re-render immediately
-                    const syncEvent = new CustomEvent('exchanges-synced', { detail: merged });
-                    window.dispatchEvent(syncEvent);
-
-                    // Upload merged array back to backend if backend was empty or different
-                    const hasBackendDiff = backendExchanges.length !== merged.length ||
-                        JSON.stringify(backendExchanges) !== JSON.stringify(merged);
-
-                    if (hasBackendDiff) {
-                        await this.syncExchangesToBackend();
-                    }
-
-
-                }
-            }
-        } catch (e) {
-            console.error('Failed to sync active exchanges from backend:', e);
-        }
-    }
-
-    /** Debounced push of local activeExchanges array to server (Fire-and-forget). */
-    async syncExchangesToBackend() {
-        if (!this.state.isAuthenticated) return;
-
-        clearTimeout(this._syncDebounceTimer);
-        this._syncDebounceTimer = setTimeout(async () => {
-            try {
-                const r = await fetch('/api/exchanges/active', {
-                    method: 'POST',
-                    headers: this._csrfHeaders,
-                    body: JSON.stringify({ activeExchanges: this.state.activeExchanges })
-                });
-                if (!r.ok) {
-                    console.error('Failed to sync exchanges to backend: server returned status', r.status);
-                }
-            } catch (e) {
-                console.error('Failed to sync active exchanges to backend:', e);
-            }
-        }, 300);
-    }
-
 }
 
 window.walletManager = new WalletManager();

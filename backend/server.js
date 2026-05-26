@@ -9,7 +9,6 @@ const rateLimit = require('express-rate-limit');
 const logger = require('./utils/logger');
 const store = require('./utils/store');
 const { validate, schemas } = require('./utils/validation');
-const authController = require('./controllers/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -37,12 +36,7 @@ app.use(helmet({
             styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             fontSrc: ["'self'", "https://fonts.gstatic.com"],
             imgSrc: ["'self'", "data:", "blob:"],
-            connectSrc: ["'self'", "https://*.walletconnect.com", "https://*.walletconnect.org",
-                          "wss://*.walletconnect.com", "wss://*.walletconnect.org",
-                          "https://rpc.walletconnect.com", "https://pulse.walletconnect.com",
-                          "https://api.web3modal.com", "https://api.web3modal.org"],
-            frameSrc: ["'self'", "https://verify.walletconnect.com", "https://verify.walletconnect.org",
-                       "https://secure.walletconnect.com", "https://secure.walletconnect.org"]
+            connectSrc: ["'self'"]
         }
     },
     crossOriginEmbedderPolicy: false
@@ -81,23 +75,6 @@ app.use(cookieParser());
 // ── Rate Limiting ───────────────────────────────────────────────────────────
 const { RedisStore } = require('rate-limit-redis');
 
-const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 30,                   // 30 requests per window
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many authentication attempts. Try again later.' },
-    store: new RedisStore({
-        sendCommand: (...args) => {
-            const client = store.getClient();
-            if (client) {
-                return client.call(...args);
-            }
-            logger.warn('Redis client not ready/available for auth rate limiter, falling back to memory degradation mode');
-            return Promise.resolve();
-        }
-    })
-});
 
 const apiLimiter = rateLimit({
     windowMs: 1 * 60 * 1000,  // 1 minute
@@ -136,54 +113,6 @@ app.get('/dashboard', (req, res) => {
 });
 app.use(express.static(path.join(__dirname, '../public')));
 
-// ─── Auth Routes ───────────────────────────────────────────────
-app.get('/api/auth/nonce', authLimiter, validate(schemas.nonceQuerySchema, 'query'), authController.getNonce);
-app.post('/api/auth/verify', authLimiter, csrfProtect, validate(schemas.verifyBodySchema, 'body'), authController.verifySig);
-app.post('/api/auth/logout', csrfProtect, authController.logout);
-
-// ─── Auth Check (lightweight session ping) ─────────────────────────────────
-// Used by frontend on page load. Returns session info without requiring headers.
-app.get('/api/auth/check', async (req, res) => {
-    const sessionId = req.cookies?.tradedash_auth;
-    if (!sessionId) return res.json({ authenticated: false, address: null });
-    const session = await require('./utils/store').get('session:' + sessionId);
-    if (!session) {
-        res.clearCookie('tradedash_auth');
-        return res.json({ authenticated: false, address: null });
-    }
-    res.json({ authenticated: true, address: session.address });
-});
-
-
-// GET currently active synced exchanges
-app.get('/api/exchanges/active', authController.requireAuth, async (req, res) => {
-    try {
-        const address = req.user.address.toLowerCase();
-        const activeExchanges = await store.get(`exchanges:active:${address}`);
-        res.json(activeExchanges || []);
-    } catch (e) {
-        logger.error('Failed to retrieve active exchanges:', e);
-        res.status(500).json({ error: 'Failed to fetch active exchanges' });
-    }
-});
-
-// POST update/sync active exchanges list
-app.post('/api/exchanges/active', csrfProtect, authController.requireAuth, validate(schemas.activeExchangesSchema, 'body'), async (req, res) => {
-    try {
-        const address = req.user.address.toLowerCase();
-        const { activeExchanges } = req.validatedBody || req.body;
-
-        // Persist globally (uses Redis if available, falls back to memory)
-        await store.set(`exchanges:active:${address}`, activeExchanges);
-
-
-        logger.info(`Synced ${activeExchanges.length} active exchanges for ${logger.maskAddress(address)}`);
-        res.json({ success: true });
-    } catch (e) {
-        logger.error('Failed to save active exchanges sync:', e);
-        res.status(500).json({ error: 'Failed to save active exchanges' });
-    }
-});
 
 // ─── Secure Key Store (HttpOnly Cookies) ───────────────────────────────────
 // This approach is secure against XSS and works perfectly on Vercel without Redis.

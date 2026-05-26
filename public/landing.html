@@ -30,11 +30,9 @@
                 <h1 class="hero-title">Master the Chaos of <span class="gradient-text">Multi-Exchange</span> Trading</h1>
                 <p class="hero-subtitle">The ultimate dashboard for pro traders. Monitor PnL, Win Rate, and Points across Extended, Nado, and Variational in real-time. Secure, encrypted, and blazing fast.</p>
                 <div class="hero-actions">
-                    <button id="btn-login-metamask" class="btn btn-primary" style="display: flex; align-items: center; gap: 10px; justify-content: center;">
-                        <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" alt="MetaMask" style="width: 20px; height: 20px;">
-                        Connect MetaMask →
-                    </button>
-                    <a href="/dashboard" class="btn btn-secondary">Launch with Password</a>
+                    <a href="/dashboard" class="btn btn-primary" id="btn-launch-dashboard" style="display: flex; align-items: center; gap: 10px; justify-content: center;">
+                        Launch Dashboard →
+                    </a>
                 </div>
                 <div class="supported-exchanges">
                     <span>Supporting:</span>
@@ -124,21 +122,5 @@
         </div>
     </footer>
 
-    <script>
-        document.getElementById('btn-login-metamask').addEventListener('click', async () => {
-            if (typeof window.ethereum !== 'undefined') {
-                try {
-                    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-                    if (accounts.length > 0) {
-                        window.location.href = '/dashboard?login=metamask';
-                    }
-                } catch (e) {
-                    console.error('MetaMask login failed:', e);
-                }
-            } else {
-                alert('Please install MetaMask to use this feature.');
-            }
-        });
-    </script>
 </body>
 </html>

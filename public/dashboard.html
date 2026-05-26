@@ -6,9 +6,7 @@
     <title>Trading Dashboard | Secure Monitoring</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preconnect" href="https://esm.run" crossorigin>
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-    <link rel="preconnect" href="https://cdn.ethers.io" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="icon" href="/assets/key.png" type="image/png">
     <link rel="stylesheet" href="css/dashboard.css">
@@ -56,7 +54,6 @@
                     <img src="assets/chest_premium.png" alt="VAULT" class="chest-icon" id="chest-img" loading="lazy" fetchpriority="high">
                 </div>
 
-                <appkit-button></appkit-button>
                 <button id="btn-add-exchange" class="btn-icon-text" data-i18n="btn_add_exchange">
                     [ + ] ADD_EXCHANGE
                 </button>
@@ -108,7 +105,7 @@
 
             <!-- Warnings -->
             <div class="security-notice" data-i18n="security_notice" style="background: rgba(76, 175, 80, 0.1); border-left: 4px solid var(--colors-token-green, #4CAF50); padding: 10px; margin-top: 20px; font-size: 0.85em;">
-                <strong>SECURITY NOTICE:</strong> We do not ask for or store your private keys. Authorization is handled via secure EIP-712 Web3 signatures and server-side stateful cookies.
+                <strong>SECURITY NOTICE:</strong> We do not ask for or store your private keys. API keys are stored exclusively in secure HttpOnly cookies on your device and never transmitted to our servers in plaintext.
             </div>
         </main>
     </div>
@@ -280,39 +277,9 @@
         <div class="spinner"></div>
         <p>SYNCHRONIZING / SYSTEM_CORE...</p>
     </div>
-    <!-- Scripts — ORDER MATTERS -->
-    <!-- 1. ethers must load before AppKit and walletManager -->
-    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-    <!-- 2. AppKit (module, depends on ethers being global) -->
-    <script type="module">
-        import { createAppKit } from 'https://esm.sh/@reown/appkit'
-        import { Ethers5Adapter } from 'https://esm.sh/@reown/appkit-adapter-ethers5'
-        import { mainnet, arbitrum } from 'https://esm.sh/@reown/appkit/networks'
-
-        const projectId = '8e391307b22a0129f957df38fc05167a'
-
-        const metadata = {
-            name: 'TradeDash',
-            description: 'Secure Trading Dashboard',
-            url: 'https://tradedash.io',
-            icons: ['https://avatars.githubusercontent.com/u/37784886']
-        }
-
-        const appKit = createAppKit({
-            adapters: [new Ethers5Adapter()],
-            networks: [mainnet, arbitrum],
-            metadata,
-            projectId,
-            features: { analytics: true }
-        })
-
-        window.appKit = appKit;
-        // Signal that AppKit is ready
-        window.dispatchEvent(new Event('appkit-ready'));
-    </script>
-    <!-- 3. canvas-confetti -->
+    <!-- 1. canvas-confetti -->
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js" defer></script>
-    <!-- 4. Local scripts — defer ensures they run after DOM is ready -->
+    <!-- 2. Local scripts — defer ensures they run after DOM is ready -->
     <script src="js/i18n.js" defer></script>
     <script src="js/walletManager.js" defer></script>
     <script src="js/exchanges.js" defer></script>

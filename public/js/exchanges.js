@@ -36,12 +36,13 @@ class ExtendedExchange extends BaseExchange {
         this.entryId = entryId;
     }
 
-    async getStats() {
+    async getStats(signal) {
         return this.fetchData(`${this.PROXY_BASE}/extended/stats`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             // Do NOT send apiKey in body — backend reads it from HttpOnly cookie by entryId
-            body: JSON.stringify({ entryId: this.entryId })
+            body: JSON.stringify({ entryId: this.entryId }),
+            signal
         });
     }
 }
@@ -52,14 +53,16 @@ class NadoExchange extends BaseExchange {
         this.walletAddress = walletAddress;
     }
 
-    async getStats() {
+    async getStats(signal) {
+        // Only send address if authenticated — never send null, it fails Zod validation
+        const sessionAddr = window.walletManager.state.address;
+        const body = { walletAddress: this.walletAddress };
+        if (sessionAddr) body.address = sessionAddr;
         return this.fetchData(`${this.PROXY_BASE}/nado/stats`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                address: window.walletManager.state.address,
-                walletAddress: this.walletAddress  // specific wallet for multi-wallet support
-            })
+            body: JSON.stringify(body),
+            signal
         });
     }
 }
@@ -70,14 +73,16 @@ class VariationalExchange extends BaseExchange {
         this.walletAddress = walletAddress;
     }
 
-    async getStats() {
+    async getStats(signal) {
+        // Only send address if authenticated — never send null, it fails Zod validation
+        const sessionAddr = window.walletManager.state.address;
+        const body = { walletAddress: this.walletAddress };
+        if (sessionAddr) body.address = sessionAddr;
         return this.fetchData(`${this.PROXY_BASE}/variational/stats`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                address: window.walletManager.state.address,
-                walletAddress: this.walletAddress  // specific wallet for multi-wallet support
-            })
+            body: JSON.stringify(body),
+            signal
         });
     }
 }

@@ -198,6 +198,7 @@ class DashboardManager {
             this.extendedConfigGroup.style.display = (v === 'extended') ? 'block' : 'none';
             document.getElementById('variational-config-group').style.display = isVar ? 'block' : 'none';
             document.getElementById('multi-wallet-group').style.display = (v && !isVar) ? 'block' : 'none';
+            // ТЕПЕР ПОКАЗУЄМО LABEL ДЛЯ ВСІХ
             document.getElementById('label-group').style.display = v ? 'block' : 'none';
         });
 
@@ -711,16 +712,23 @@ class DashboardManager {
     patchCard(existingCard, res) {
         const { id, exchange, success, error } = res;
 
-        // If success status changed (success vs error), just re-render card content to avoid complex structure transition logic
-        const wasSuccess = existingCard.querySelector('.wallet-stats-grid') !== null;
-        if (wasSuccess !== success) {
+        // Use data-status attribute to track state transition without .querySelector
+        const prevStatus = existingCard.dataset.status || 'unknown';
+        const nextStatus = success ? 'success' : 'error';
+
+        // If success status changed, a full structural re-render is required
+        if (prevStatus !== 'unknown' && prevStatus !== nextStatus) {
             const freshCard = this.createExchangeCard(res);
             existingCard.innerHTML = freshCard.innerHTML;
+            existingCard.dataset.status = nextStatus;
             return;
         }
 
+        // Mark current status
+        existingCard.dataset.status = nextStatus;
+
         if (!success) {
-            // Both are errors, update error message if changed
+            // Both are errors — update message only if it actually changed
             const errorContainer = existingCard.querySelector('.error-text');
             if (errorContainer) {
                 const newErrText = `SYNC ERROR: ${this.escapeHtml(error || (window.i18n ? window.i18n.t('failed_sync') : 'Connection Failed'))}`;
@@ -731,87 +739,72 @@ class DashboardManager {
             return;
         }
 
-        // Both are successes, patch the values in-place
+        // ── Both are successes — patch values in-place ─────────────────────
         const data = this.walletData[id] || {};
-        const pnlClass = (data.pnl || 0) >= 0 ? 'positive' : 'negative';
+
+        // ── Helper: update textContent only if changed ──────────────────────
+        const setText = (selector, val) => {
+            const el = existingCard.querySelector(selector);
+            if (el) {
+                const s = String(val);
+                if (el.textContent !== s) el.textContent = s;
+            }
+        };
+
+        // ── Helper: update textContent AND toggle class atomically ──────────
+        const setTextWithClass = (selector, val, positiveClass, negativeClass, isPositive) => {
+            const el = existingCard.querySelector(selector);
+            if (!el) return;
+            const s = String(val);
+            if (el.textContent !== s) el.textContent = s;
+            const wantedExtra = isPositive ? positiveClass : negativeClass;
+            const unwantedExtra = isPositive ? negativeClass : positiveClass;
+            if (!el.classList.contains(wantedExtra)) el.classList.add(wantedExtra);
+            if (el.classList.contains(unwantedExtra)) el.classList.remove(unwantedExtra);
+        };
 
         // ── $/POINT metric ─────────────────────────────────────────────────
-        let pointValue = 'FREE';
+        let pointValue;
         if (data.points && data.points > 0) {
-            if (data.pnl < 0) {
-                pointValue = `$${(Math.abs(data.pnl) / data.points).toFixed(4)}`;
-            } else {
-                pointValue = `+$${(data.pnl / data.points).toFixed(4)}`;
-            }
+            pointValue = data.pnl < 0
+                ? `$${(Math.abs(data.pnl) / data.points).toFixed(4)}`
+                : `+$${(data.pnl / data.points).toFixed(4)}`;
         } else {
             pointValue = 'N/A';
         }
 
+        // ── ROI ────────────────────────────────────────────────────────────
         let roi = 0;
         if (exchange === 'variational' && data.roi !== undefined && data.roi !== null) {
             roi = data.roi;
         } else {
             roi = data.initDeposit > 0 ? (data.pnl / data.initDeposit) * 100 : 0;
         }
-        const roiClass = roi >= 0 ? 'positive' : 'negative';
 
-        // Variational footer check
+        // ── Footer timestamp ───────────────────────────────────────────────
         let footerTimestamp;
         if (exchange === 'variational' && res.data && res.data._inputDate) {
             const inputD = new Date(res.data._inputDate);
-            const dateStr = inputD.toLocaleDateString() + ' ' + inputD.toLocaleTimeString();
-            footerTimestamp = `${window.i18n ? window.i18n.t('var_input_date') : 'Data entered'}: ${dateStr}`;
+            footerTimestamp = `${window.i18n ? window.i18n.t('var_input_date') : 'Data entered'}: ${inputD.toLocaleDateString()} ${inputD.toLocaleTimeString()}`;
         } else {
             footerTimestamp = `Last sync: ${new Date().toLocaleTimeString()}`;
         }
 
-        // Selective DOM element content and class updates
-        const updateText = (selector, val) => {
-            const el = existingCard.querySelector(selector);
-            if (el && el.textContent !== String(val)) {
-                el.textContent = String(val);
-            }
-        };
+        // ── Patch numeric text nodes ───────────────────────────────────────
+        setText('.val-init-deposit', window.Utils.formatCurrency(data.initDeposit));
+        setText('.val-act-deposit',  window.Utils.formatCurrency(data.actDeposit));
+        setText('.val-volume',       window.Utils.formatCurrency(data.volume));
+        setText('.val-points',       (data.points || 0).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+        setText('.val-rank',         data.rank ? data.rank : 'N/A');
+        setText('.val-win-rate',     window.Utils.formatPercent(data.winRate));
+        setText('.val-point-value',  pointValue);
+        setText('.timestamp',        footerTimestamp);
 
-        updateText('.val-init-deposit', window.Utils.formatCurrency(data.initDeposit));
-        updateText('.val-act-deposit', window.Utils.formatCurrency(data.actDeposit));
-        updateText('.val-volume', window.Utils.formatCurrency(data.volume));
-        updateText('.val-points', (data.points || 0).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-        updateText('.val-rank', data.rank ? data.rank : 'N/A');
+        // ── Patch PnL (text + positive/negative class) ─────────────────────
+        setTextWithClass('.val-pnl', window.Utils.formatCurrency(data.pnl), 'positive', 'negative', (data.pnl || 0) >= 0);
 
-        // PNL update with class
-        const pnlEl = existingCard.querySelector('.val-pnl');
-        if (pnlEl) {
-            const fmtPnl = window.Utils.formatCurrency(data.pnl);
-            if (pnlEl.textContent !== fmtPnl) {
-                pnlEl.textContent = fmtPnl;
-            }
-            pnlEl.className = `stat-value val-pnl ${pnlClass}`;
-        }
-
-        updateText('.val-win-rate', window.Utils.formatPercent(data.winRate));
-
-        // ROI update with class
-        const roiEl = existingCard.querySelector('.val-roi');
-        if (roiEl) {
-            const fmtRoi = window.Utils.formatPercent(roi);
-            if (roiEl.textContent !== fmtRoi) {
-                roiEl.textContent = fmtRoi;
-            }
-            roiEl.className = `stat-value val-roi ${roiClass}`;
-        }
-
-        // Point value element
-        const ptValEl = existingCard.querySelector('.val-point-value');
-        if (ptValEl && ptValEl.textContent !== pointValue) {
-            ptValEl.textContent = pointValue;
-        }
-
-        // Footer Timestamp
-        const timeEl = existingCard.querySelector('.timestamp');
-        if (timeEl && timeEl.textContent !== footerTimestamp) {
-            timeEl.textContent = footerTimestamp;
-        }
+        // ── Patch ROI (text + positive/negative class) ─────────────────────
+        setTextWithClass('.val-roi', window.Utils.formatPercent(roi), 'positive', 'negative', roi >= 0);
     }
 
     removeWallet(id) {
@@ -996,19 +989,28 @@ class DashboardManager {
             }
         });
         const meanWinRate = winRateCount > 0 ? (totalWinRate / winRateCount) : 0;
-
         const totalROI = totalInit > 0 ? (totalPnL / totalInit) * 100 : 0;
 
-        document.getElementById('total-deposit').textContent = window.Utils.formatCurrency(totalInit);
-        document.getElementById('total-pnl').textContent = window.Utils.formatCurrency(totalPnL);
-        document.getElementById('total-roi').textContent = window.Utils.formatPercent(totalROI);
-        document.getElementById('total-win-rate').textContent = window.Utils.formatPercent(meanWinRate);
-        document.getElementById('total-volume').textContent = window.Utils.formatCurrency(totalVol);
+        // ── Helper: only write if the value has changed (guards layout recalc) ──
+        const patchText = (id, val) => {
+            const el = document.getElementById(id);
+            if (el && el.textContent !== val) el.textContent = val;
+        };
 
+        patchText('total-deposit',  window.Utils.formatCurrency(totalInit));
+        patchText('total-pnl',      window.Utils.formatCurrency(totalPnL));
+        patchText('total-win-rate', window.Utils.formatPercent(meanWinRate));
+        patchText('total-volume',   window.Utils.formatCurrency(totalVol));
+
+        // ROI also gets positive/negative class — guard both text AND class
         const roiEl = document.getElementById('total-roi');
         if (roiEl) {
-            roiEl.textContent = window.Utils.formatPercent(totalROI);
-            roiEl.className = totalROI >= 0 ? 'value positive' : 'value negative';
+            const fmtRoi = window.Utils.formatPercent(totalROI);
+            if (roiEl.textContent !== fmtRoi) roiEl.textContent = fmtRoi;
+            const wantedClass = totalROI >= 0 ? 'positive' : 'negative';
+            const unwantedClass = totalROI >= 0 ? 'negative' : 'positive';
+            if (!roiEl.classList.contains(wantedClass)) roiEl.classList.add(wantedClass);
+            if (roiEl.classList.contains(unwantedClass)) roiEl.classList.remove(unwantedClass);
         }
     }
 }

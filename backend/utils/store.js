@@ -1,19 +1,17 @@
 /**
  * KeyValueStore — abstracts session/nonce storage.
- * Uses Redis when REDIS_URL is configured, falls back to in-memory Map.
+ * Completely relies on Redis (ioredis) as a strict dependency.
  *
  * All values are stored as JSON strings with optional TTL (seconds).
  */
 const logger = require('./logger');
 
 let redisClient = null;
-let useRedis = false;
 
 // ── Redis initialization ──────────────────────────────────────────────────────
 async function initRedis() {
     if (!process.env.REDIS_URL) {
-        logger.warn('REDIS_URL not set — using in-memory store (sessions will be lost on restart)');
-        return false;
+        throw new Error('REDIS_URL environment variable is not defined.');
     }
 
     try {
@@ -31,35 +29,16 @@ async function initRedis() {
 
         await redisClient.connect();
         await redisClient.ping();
-        useRedis = true;
         logger.info('✅ Redis connected successfully');
         return true;
     } catch (err) {
-        logger.error('Redis connection failed, falling back to in-memory store:', err.message);
         if (redisClient) {
             try { await redisClient.quit(); } catch(_) {}
         }
         redisClient = null;
-        useRedis = false;
-        return false;
+        throw new Error(`Redis connection failed: ${err.message}`);
     }
 }
-
-// ── In-memory fallback ────────────────────────────────────────────────────────
-const memoryStore = new Map();
-const memoryTTLs  = new Map();
-
-function cleanExpired() {
-    const now = Date.now();
-    for (const [key, expiry] of memoryTTLs) {
-        if (now > expiry) {
-            memoryStore.delete(key);
-            memoryTTLs.delete(key);
-        }
-    }
-}
-// Cleanup every 60 seconds
-setInterval(cleanExpired, 60_000);
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -69,20 +48,10 @@ setInterval(cleanExpired, 60_000);
  * @returns {Promise<any|null>}
  */
 async function get(key) {
-    if (useRedis && redisClient) {
-        try {
-            const val = await redisClient.get(key);
-            return val ? JSON.parse(val) : null;
-        } catch (err) {
-            logger.error(`Redis GET error for key=${key}:`, err.message);
-            // Fallback to memory
-            cleanExpired();
-            const memVal = memoryStore.get(key);
-            return memVal ? JSON.parse(memVal) : null;
-        }
+    if (!redisClient) {
+        throw new Error('Redis client is not initialized.');
     }
-    cleanExpired();
-    const val = memoryStore.get(key);
+    const val = await redisClient.get(key);
     return val ? JSON.parse(val) : null;
 }
 
@@ -93,25 +62,14 @@ async function get(key) {
  * @param {number|null} ttlSeconds
  */
 async function set(key, value, ttlSeconds = null) {
-    const serialized = JSON.stringify(value);
-
-    if (useRedis && redisClient) {
-        try {
-            if (ttlSeconds) {
-                await redisClient.setex(key, ttlSeconds, serialized);
-            } else {
-                await redisClient.set(key, serialized);
-            }
-            return;
-        } catch (err) {
-            logger.error(`Redis SET error for key=${key}:`, err.message);
-            // Fallback to memory
-        }
+    if (!redisClient) {
+        throw new Error('Redis client is not initialized.');
     }
-
-    memoryStore.set(key, serialized);
+    const serialized = JSON.stringify(value);
     if (ttlSeconds) {
-        memoryTTLs.set(key, Date.now() + ttlSeconds * 1000);
+        await redisClient.setex(key, ttlSeconds, serialized);
+    } else {
+        await redisClient.set(key, serialized);
     }
 }
 
@@ -120,16 +78,10 @@ async function set(key, value, ttlSeconds = null) {
  * @param {string} key
  */
 async function del(key) {
-    if (useRedis && redisClient) {
-        try {
-            await redisClient.del(key);
-            return;
-        } catch (err) {
-            logger.error(`Redis DEL error for key=${key}:`, err.message);
-        }
+    if (!redisClient) {
+        throw new Error('Redis client is not initialized.');
     }
-    memoryStore.delete(key);
-    memoryTTLs.delete(key);
+    await redisClient.del(key);
 }
 
 /**
@@ -138,15 +90,10 @@ async function del(key) {
  * @returns {Promise<boolean>}
  */
 async function exists(key) {
-    if (useRedis && redisClient) {
-        try {
-            return (await redisClient.exists(key)) === 1;
-        } catch (err) {
-            logger.error(`Redis EXISTS error for key=${key}:`, err.message);
-        }
+    if (!redisClient) {
+        throw new Error('Redis client is not initialized.');
     }
-    cleanExpired();
-    return memoryStore.has(key);
+    return (await redisClient.exists(key)) === 1;
 }
 
 module.exports = {

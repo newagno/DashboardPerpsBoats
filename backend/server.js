@@ -15,8 +15,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
-// ── Initialize Redis (async, non-blocking) ──────────────────────────────────
-store.initRedis().catch(err => logger.error('Redis init failed:', err));
+// ── Initialize Redis (async, blocking) ──────────────────────────────────────
+(async () => {
+    try {
+        await store.initRedis();
+    } catch (err) {
+        logger.error('CRITICAL: Redis initialization failed. Server cannot start.', err);
+        process.exit(1);
+    }
+})();
 
 // Axios instance with global timeout (reduced for Vercel)
 const http = axios.create({ timeout: isProd ? 9000 : 60000 });
@@ -197,16 +204,14 @@ app.post('/api/exchanges/keys/store', csrfProtect, validate(schemas.storeKeySche
 });
 
 // ─── Check if a key exists in Cookies ──────────────────────────────────────
-app.get('/api/exchanges/keys/check', (req, res) => {
-    const { type, entryId } = req.query;
-    if (!type || !entryId) return res.status(400).json({ error: 'Missing type or entryId' });
+app.get('/api/exchanges/keys/check', validate(schemas.keyCheckQuerySchema, 'query'), (req, res) => {
+    const { type, entryId } = req.validatedQuery;
     const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
     res.json({ exists: !!req.cookies[cookieName] });
 });
 
-app.post('/api/exchanges/keys/remove', csrfProtect, (req, res) => {
-    const { type, entryId } = req.body;
-    if (!type || !entryId) return res.status(400).json({ error: 'Missing type or entryId' });
+app.post('/api/exchanges/keys/remove', csrfProtect, validate(schemas.keyRemoveBodySchema, 'body'), (req, res) => {
+    const { type, entryId } = req.validatedBody;
     const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
     res.clearCookie(cookieName);
     logger.info(`Removed ${type} key for entry ${entryId} from cookies`);
@@ -214,12 +219,10 @@ app.post('/api/exchanges/keys/remove', csrfProtect, (req, res) => {
 });
 
 // ─── Proxy - Extended Exchange (Starknet) ────────────────────────────────────
-app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, res) => {
+app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(schemas.extendedEntryIdSchema, 'body'), async (req, res) => {
     const errors = [];
     try {
-        // Look up API key from HttpOnly Cookie using entryId
-        const entryId = req.body.entryId;
-        if (!entryId) return res.status(400).json({ error: 'entryId required' });
+        const entryId = req.validatedBody.entryId;
         
         const apiKey = req.cookies[`ext_key_${entryId}`];
         if (!apiKey) return res.status(404).json({ error: 'API Key not found in vault. Please re-add this exchange.' });
@@ -230,7 +233,7 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, async (req, r
             'Accept': 'application/json'
         };
 
-        const BASE = 'https://api.starknet.extended.exchange/api/v1';
+        const BASE = process.env.EXTENDED_API_URL || 'https://api.starknet.extended.exchange/api/v1';
 
         // Load incremental stats from cache
         const cacheKey = `cache:extended:${entryId}`;
@@ -421,10 +424,9 @@ const fetchAllExtendedPaginated = async (BASE, endpoint, cachedList = [], getUni
 };
 
 // ─── Incremental History Sync - Extended Exchange ────────────────────────────
-app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, async (req, res) => {
+app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, validate(schemas.extendedEntryIdSchema, 'body'), async (req, res) => {
     try {
-        const entryId = req.body.entryId;
-        if (!entryId) return res.status(400).json({ error: 'entryId required' });
+        const entryId = req.validatedBody.entryId;
 
         const apiKey = req.cookies[`ext_key_${entryId}`];
         if (!apiKey) return res.status(404).json({ error: 'API Key not found in vault' });
@@ -435,7 +437,7 @@ app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, async 
             'Accept': 'application/json'
         };
 
-        const BASE = 'https://api.starknet.extended.exchange/api/v1';
+        const BASE = process.env.EXTENDED_API_URL || 'https://api.starknet.extended.exchange/api/v1';
         const cacheKey = `cache:extended:${entryId}`;
         const cached = await store.get(cacheKey) || {
             trades: [],
@@ -477,11 +479,10 @@ app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, async 
 
 
 // ─── Proxy - Nado Exchange (Ink L2) ─────────────────────────────────────────
-app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) => {
+app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, validate(schemas.nadoStatsSchema, 'body'), async (req, res) => {
     try {
-        const { address, walletAddress } = req.body;
+        const { address, walletAddress } = req.validatedBody;
         const targetAddress = walletAddress || address;
-        if (!targetAddress) return res.status(400).json({ error: 'Address required' });
 
         const archiveHeaders = {
             'Accept': 'application/json',
@@ -505,16 +506,19 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
         let pnlFromTrades = 0;
         let wins = 0, totalClosed = 0;
 
+        const gatewayUrl = process.env.NADO_GATEWAY_URL || 'https://gateway.prod.nado.xyz/v1';
+        const archiveUrl = process.env.NADO_ARCHIVE_URL || 'https://archive.prod.nado.xyz/v1';
+
         // 1. Fetch balance (Total Equity), active deposit snapshot, events, and points fresh in parallel
         const [subRes, snapRes, evRes, pointsRes] = await Promise.all([
-            http.get(`https://gateway.prod.nado.xyz/v1/query?type=subaccount_info&subaccount=${sender}`).catch(() => ({ data: {} })),
-            http.post('https://archive.prod.nado.xyz/v1', {
+            http.get(`${gatewayUrl}/query?type=subaccount_info&subaccount=${sender}`).catch(() => ({ data: {} })),
+            http.post(archiveUrl, {
                 account_snapshots: { subaccounts: [sender], timestamps: [Date.now() * 1000000], active: false }
             }, { headers: archiveHeaders }).catch(() => ({ data: {} })),
-            http.post('https://archive.prod.nado.xyz/v1', {
+            http.post(archiveUrl, {
                 events: { subaccounts: [sender], event_types: ['deposit_collateral', 'withdraw_collateral'], limit: { raw: 2000 } }
             }, { headers: archiveHeaders }).catch(() => ({ data: {} })),
-            http.post('https://archive.prod.nado.xyz/v1', {
+            http.post(archiveUrl, {
                 nado_points: { address: targetAddress }
             }, { headers: archiveHeaders }).catch(() => ({ data: {} }))
         ]);
@@ -618,11 +622,10 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, async (req, res) 
 });
 
 // ─── Incremental History Sync - Nado Exchange ────────────────────────────────
-app.post('/api/exchanges/nado/sync-history', apiLimiter, csrfProtect, async (req, res) => {
+app.post('/api/exchanges/nado/sync-history', apiLimiter, csrfProtect, validate(schemas.nadoSyncSchema, 'body'), async (req, res) => {
     try {
-        const { address, walletAddress } = req.body;
+        const { address, walletAddress } = req.validatedBody;
         const targetAddress = walletAddress || address;
-        if (!targetAddress) return res.status(400).json({ error: 'Address required' });
 
         const archiveHeaders = {
             'Accept': 'application/json',
@@ -653,7 +656,8 @@ app.post('/api/exchanges/nado/sync-history', apiLimiter, csrfProtect, async (req
             const pld = { orders: { subaccounts: [sender], limit: 100 } };
             if (cursor) pld.orders.idx = cursor;
             
-            const r = await http.post('https://archive.prod.nado.xyz/v1', pld, { headers: archiveHeaders }).catch(() => null);
+            const archiveUrl = process.env.NADO_ARCHIVE_URL || 'https://archive.prod.nado.xyz/v1';
+            const r = await http.post(archiveUrl, pld, { headers: archiveHeaders }).catch(() => null);
             const batch = r?.data?.orders || [];
             if (batch.length > 0) { 
                 cursor = batch[batch.length-1].idx;
@@ -700,15 +704,14 @@ app.post('/api/exchanges/nado/sync-history', apiLimiter, csrfProtect, async (req
 
 
 // ─── Proxy - Variational Exchange (Arbitrum) ─────────────────────────────────
-app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, async (req, res) => {
+app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(schemas.variationalStatsSchema, 'body'), async (req, res) => {
     try {
         // walletAddress allows multi-wallet support
-        const { address, walletAddress } = req.body;
+        const { address, walletAddress } = req.validatedBody;
         const targetAddress = walletAddress || address;
-        if (!targetAddress) return res.status(400).json({ error: 'Address required' });
 
-        const OMNI_API = 'https://omni.variational.io/api';
-        const OMNI_PUB = 'https://omni-client-api.prod.ap-northeast-1.variational.io';
+        const OMNI_API = process.env.VARIATIONAL_API_URL || 'https://omni.variational.io/api';
+        const OMNI_PUB = process.env.VARIATIONAL_PUB_URL || 'https://omni-client-api.prod.ap-northeast-1.variational.io';
 
         // Forward the vr-token session cookie from the browser (or body) to Omni API
         const vrToken = req.body.vrToken || req.cookies?.['vr-token'];

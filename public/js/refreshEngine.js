@@ -8,6 +8,7 @@ class RefreshEngine {
         this.timerId = null;
         this.isRefreshing = false;
         this.isNextCircle = true;
+        this.abortController = null;
     }
 
     start() {
@@ -58,7 +59,15 @@ class RefreshEngine {
     }
 
     async refresh() {
-        if (this.isRefreshing) return;
+        if (this.isRefreshing) {
+            if (this.abortController) {
+                console.log('Aborting active refresh cycle to start a new one...');
+                this.abortController.abort();
+            }
+        }
+
+        this.abortController = new AbortController();
+        const signal = this.abortController.signal;
 
         console.log('Starting parallel refresh cycle...');
         this.isRefreshing = true;
@@ -75,125 +84,146 @@ class RefreshEngine {
             return;
         }
 
-        // Each entry is { id, exchange, walletAddress, label }
-        const refreshPromises = exchangeEntries.map(async (entry) => {
-            const { id, exchange, walletAddress, label } = entry;
-            // Effective wallet: use entry's walletAddress or fall back to session address
-            const effectiveAddress = walletAddress || sessionAddress;
+        try {
+            // Each entry is { id, exchange, walletAddress, label }
+            const refreshPromises = exchangeEntries.map(async (entry) => {
+                const { id, exchange, walletAddress, label } = entry;
+                // Effective wallet: use entry's walletAddress or fall back to session address
+                const effectiveAddress = walletAddress || sessionAddress;
 
-            try {
-                let data;
-                if (exchange === 'extended') {
-                    // Pass null as key — backend reads it from the Vault using entryId
-                    const obj = new window.Exchanges.Extended(null, id);
-                    data = await obj.getStats();
-                } else if (exchange === 'nado') {
-                    // Pass walletAddress as 'walletAddress' so server uses that specific address
-                    const obj = new window.Exchanges.Nado(effectiveAddress);
-                    data = await obj.getStats();
-                } else if (exchange === 'variational') {
-                    // Manual data short-circuit — no API call, read from stored entry
-                    if (!entry.manualData) {
-                        console.warn(`Variational entry ${id} has no manualData. Removing.`);
-                        window.walletManager.removeExchange(id);
+                try {
+                    let data;
+                    if (exchange === 'extended') {
+                        // Pass null as key — backend reads it from the Vault using entryId
+                        const obj = new window.Exchanges.Extended(null, id);
+                        data = await obj.getStats(signal);
+                    } else if (exchange === 'nado') {
+                        // Pass walletAddress as 'walletAddress' so server uses that specific address
+                        const obj = new window.Exchanges.Nado(effectiveAddress);
+                        data = await obj.getStats(signal);
+                    } else if (exchange === 'variational') {
+                        // Manual data short-circuit — no API call, read from stored entry
+                        if (!entry.manualData) {
+                            console.warn(`Variational entry ${id} has no manualData. Removing.`);
+                            window.walletManager.removeExchange(id);
+                            return null;
+                        }
+                        const md = entry.manualData;
+                        data = {
+                            init_deposit: md.initDeposit || 0,
+                            act_deposit:  md.actDeposit  || 0,
+                            total_volume: md.volume      || 0,
+                            points:       md.points      || 0,
+                            rank:         md.rank        || null,
+                            win_rate:     md.winRate     || 0,
+                            roi:          (md.roi !== undefined && md.roi !== null) ? md.roi : null,
+                            _inputDate:   md.inputDate   || null
+                        };
+                    } else {
                         return null;
                     }
-                    const md = entry.manualData;
-                    data = {
-                        init_deposit: md.initDeposit || 0,
-                        act_deposit:  md.actDeposit  || 0,
-                        total_volume: md.volume      || 0,
-                        points:       md.points      || 0,
-                        rank:         md.rank        || null,
-                        win_rate:     md.winRate     || 0,
-                        roi:          (md.roi !== undefined && md.roi !== null) ? md.roi : null,
-                        _inputDate:   md.inputDate   || null
-                    };
-                } else {
-                    return null;
-                }
 
-                return { id, exchange, walletAddress: effectiveAddress, label, data, success: true };
-            } catch (error) {
-                console.error(`Failed to refresh ${exchange} (${effectiveAddress}):`, error);
-                return { id, exchange, walletAddress: effectiveAddress, label, error: error.message, success: false };
-            }
-        });
-
-        const results = (await Promise.all(refreshPromises)).filter(r => r !== null);
-
-        // Update cache
-        try {
-            const cacheStr = localStorage.getItem('exchange_cache_v1');
-            const cache = cacheStr ? JSON.parse(cacheStr) : {};
-            results.forEach(r => {
-                if (r.success && r.exchange !== 'variational') {
-                    cache[r.id] = r;
+                    return { id, exchange, walletAddress: effectiveAddress, label, data, success: true };
+                } catch (error) {
+                    if (error.name === 'AbortError') {
+                        console.log('Fetch aborted');
+                        throw error;
+                    }
+                    console.error(`Failed to refresh ${exchange} (${effectiveAddress}):`, error);
+                    return { id, exchange, walletAddress: effectiveAddress, label, error: error.message, success: false };
                 }
             });
-            localStorage.setItem('exchange_cache_v1', JSON.stringify(cache));
-        } catch (e) {
-            console.error("Failed to update cache", e);
-        }
 
-        window.dashboardMgr.updateAllWalletCards(results);
-        window.dashboardMgr.updateSummary();
-        document.getElementById('last-update').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+            const results = (await Promise.all(refreshPromises)).filter(r => r !== null);
 
-        // Trigger client-initiated background sync if server indicates requires_history_sync
-        results.forEach(r => {
-            if (r.success && r.data && r.data.requires_history_sync) {
-                console.log(`Initiating client-side background sync for ${r.exchange} ID ${r.id}...`);
-                const syncUrl = `/api/exchanges/${r.exchange}/sync-history`;
-                const requestBody = r.exchange === 'extended' 
-                    ? { entryId: r.id } 
-                    : { address: r.walletAddress, walletAddress: r.walletAddress };
-                
-                fetch(syncUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Requested-With': 'TradeDash'
-                    },
-                    body: JSON.stringify(requestBody)
-                }).then(async (syncResponse) => {
-                    if (syncResponse.ok) {
-                        console.log(`Background sync completed for ${r.exchange} ID ${r.id}. Re-fetching fresh stats...`);
-                        
-                        let freshData;
-                        if (r.exchange === 'extended') {
-                            const obj = new window.Exchanges.Extended(null, r.id);
-                            freshData = await obj.getStats();
-                        } else if (r.exchange === 'nado') {
-                            const obj = new window.Exchanges.Nado(r.walletAddress);
-                            freshData = await obj.getStats();
-                        }
-                        
-                        if (freshData) {
-                            r.data = freshData;
-                            // Update cache
-                            try {
-                                const cacheStr = localStorage.getItem('exchange_cache_v1');
-                                const cache = cacheStr ? JSON.parse(cacheStr) : {};
-                                cache[r.id] = r;
-                                localStorage.setItem('exchange_cache_v1', JSON.stringify(cache));
-                            } catch (e) {}
-                            
-                            // Re-render UI to display updated history stats
-                            window.dashboardMgr.updateAllWalletCards(results);
-                            window.dashboardMgr.updateSummary();
-                        }
-                    } else {
-                        console.error(`Background sync failed for ${r.exchange} ID ${r.id}`);
+            if (signal.aborted) return;
+
+            // Update cache
+            try {
+                const cacheStr = localStorage.getItem('exchange_cache_v1');
+                const cache = cacheStr ? JSON.parse(cacheStr) : {};
+                results.forEach(r => {
+                    if (r.success && r.exchange !== 'variational') {
+                        cache[r.id] = r;
                     }
-                }).catch(e => {
-                    console.error(`Background sync failed for ${r.exchange} ID ${r.id}:`, e);
                 });
+                localStorage.setItem('exchange_cache_v1', JSON.stringify(cache));
+            } catch (e) {
+                console.error("Failed to update cache", e);
             }
-        });
 
-        this.isRefreshing = false;
-        this.updateLoadingState(false);
+            window.dashboardMgr.updateAllWalletCards(results);
+            window.dashboardMgr.updateSummary();
+            document.getElementById('last-update').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+
+            // Trigger client-initiated background sync if server indicates requires_history_sync
+            results.forEach(r => {
+                if (r.success && r.data && r.data.requires_history_sync) {
+                    console.log(`Initiating client-side background sync for ${r.exchange} ID ${r.id}...`);
+                    const syncUrl = `/api/exchanges/${r.exchange}/sync-history`;
+                    const requestBody = r.exchange === 'extended' 
+                        ? { entryId: r.id } 
+                        : { address: r.walletAddress, walletAddress: r.walletAddress };
+                    
+                    fetch(syncUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Requested-With': 'TradeDash'
+                        },
+                        body: JSON.stringify(requestBody),
+                        signal
+                    }).then(async (syncResponse) => {
+                        if (syncResponse.ok) {
+                            console.log(`Background sync completed for ${r.exchange} ID ${r.id}. Re-fetching fresh stats...`);
+                            
+                            let freshData;
+                            if (r.exchange === 'extended') {
+                                const obj = new window.Exchanges.Extended(null, r.id);
+                                freshData = await obj.getStats(signal);
+                            } else if (r.exchange === 'nado') {
+                                const obj = new window.Exchanges.Nado(r.walletAddress);
+                                freshData = await obj.getStats(signal);
+                            }
+                            
+                            if (freshData && !signal.aborted) {
+                                r.data = freshData;
+                                // Update cache
+                                try {
+                                    const cacheStr = localStorage.getItem('exchange_cache_v1');
+                                    const cache = cacheStr ? JSON.parse(cacheStr) : {};
+                                    cache[r.id] = r;
+                                    localStorage.setItem('exchange_cache_v1', JSON.stringify(cache));
+                                } catch (e) {}
+                                
+                                // Re-render UI to display updated history stats
+                                window.dashboardMgr.updateAllWalletCards(results);
+                                window.dashboardMgr.updateSummary();
+                            }
+                        } else {
+                            console.error(`Background sync failed for ${r.exchange} ID ${r.id}`);
+                        }
+                    }).catch(e => {
+                        if (e.name === 'AbortError') {
+                            console.log('Background sync aborted');
+                        } else {
+                            console.error(`Background sync failed for ${r.exchange} ID ${r.id}:`, e);
+                        }
+                    });
+                }
+            });
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                console.log('Refresh cycle aborted');
+                return;
+            }
+            console.error('Refresh cycle failed:', e);
+        } finally {
+            if (this.abortController && this.abortController.signal === signal) {
+                this.isRefreshing = false;
+                this.updateLoadingState(false);
+            }
+        }
     }
 
     updateLoadingState(loading, isInitial = false) {

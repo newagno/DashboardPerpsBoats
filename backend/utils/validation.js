@@ -9,6 +9,18 @@ const ethereumAddress = z.string()
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address format')
     .transform(v => v.toLowerCase());
 
+// Starknet L2 addresses are 66 chars (0x + 64 hex)
+const starknetOrEthAddress = z.string()
+    .regex(/^0x[a-fA-F0-9]{40,64}$/, 'Invalid address format (expected ETH or Starknet address)')
+    .transform(v => v.toLowerCase());
+
+const entryId = z.string()
+    .min(1, 'entryId required')
+    .max(128, 'entryId too long')
+    .regex(/^[a-zA-Z0-9_\-]+$/, 'entryId contains invalid characters');
+
+const keyType = z.enum(['extended', 'variational'], { message: 'type must be extended or variational' });
+
 const apiKeyString = z.string()
     .min(8, 'API key too short')
     .max(256, 'API key too long')
@@ -40,20 +52,45 @@ const extendedStatsSchema = z.object({
 });
 
 const nadoStatsSchema = z.object({
-    address: ethereumAddress.optional(),
-    walletAddress: ethereumAddress
+    address: starknetOrEthAddress.optional().nullable(),
+    walletAddress: starknetOrEthAddress.optional()
+}).refine(data => data.address || data.walletAddress, {
+    message: 'address or walletAddress is required'
+});
+
+const nadoSyncSchema = z.object({
+    address: starknetOrEthAddress.optional(),
+    walletAddress: starknetOrEthAddress.optional()
+}).refine(data => data.address || data.walletAddress, {
+    message: 'address or walletAddress is required'
 });
 
 const variationalStatsSchema = z.object({
-    address: ethereumAddress.optional(),
-    walletAddress: ethereumAddress,
+    address: starknetOrEthAddress.optional(),
+    walletAddress: starknetOrEthAddress.optional(),
     vrToken: z.string().min(1).max(4096).optional()
+}).refine(data => data.address || data.walletAddress, {
+    message: 'address or walletAddress is required'
 });
 
 const storeKeySchema = z.object({
-    type: z.enum(['extended', 'variational']),
-    entryId: z.string().min(1).max(128),
+    type: keyType,
+    entryId: entryId,
     value: z.string().min(1).max(4096)
+});
+
+const keyCheckQuerySchema = z.object({
+    type: keyType,
+    entryId: entryId
+});
+
+const keyRemoveBodySchema = z.object({
+    type: keyType,
+    entryId: entryId
+});
+
+const extendedEntryIdSchema = z.object({
+    entryId: entryId
 });
 
 const activeExchangesSchema = z.object({
@@ -102,9 +139,13 @@ module.exports = {
         nonceQuerySchema,
         verifyBodySchema,
         extendedStatsSchema,
+        extendedEntryIdSchema,
         nadoStatsSchema,
+        nadoSyncSchema,
         variationalStatsSchema,
         storeKeySchema,
+        keyCheckQuerySchema,
+        keyRemoveBodySchema,
         activeExchangesSchema
     },
     validate

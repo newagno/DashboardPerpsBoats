@@ -179,7 +179,7 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
         const requiresSync = !cached.lastSync || (Date.now() - cached.lastSync > 5 * 60 * 1000);
 
         // Fetch only current balances, earned rewards, leaderboard and PnL charts fresh (Non-paginated fast requests)
-        const [balanceRes, pointsRes, leaderboardRes, pnlChartRes] = await Promise.all([
+        const [balanceRes, pointsRes, leaderboardRes, pnlChartRes, operationsRes] = await Promise.all([
             http.get(`${BASE}/user/balance`, { headers })
                 .catch(e => { errors.push(`balance: ${e.message}`); logger.error('Extended balance error:', e.message); return { data: {} }; }),
             http.get(`${BASE}/user/rewards/earned`, { headers })
@@ -187,17 +187,35 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
             http.get(`${BASE}/user/rewards/leaderboard/stats`, { headers })
                 .catch(e => { errors.push(`leaderboard: ${e.message}`); logger.error('Extended leaderboard error:', e.message); return { data: { data: {} } }; }),
             http.get(`${BASE}/portfolio/charts/pnl?interval=ALL&pnlType=TOTAL_PNL`, { headers })
-                .catch(e => { errors.push(`pnlChart: ${e.message}`); logger.error('Extended pnlChart error:', e.message); return { data: { data: [] } }; })
+                .catch(e => { 
+                    const errMsg = e.response?.data ? JSON.stringify(e.response.data) : e.message;
+                    errors.push(`pnlChart: ${errMsg}`); 
+                    logger.error(`Extended pnlChart error: ${errMsg}`); 
+                    return { data: { data: [] } }; 
+                }),
+            http.get(`${BASE}/user/assetOperations?limit=100`, { headers })
+                .catch(e => { 
+                    const errMsg = e.response?.data ? JSON.stringify(e.response.data) : e.message;
+                    errors.push(`operations: ${errMsg}`); 
+                    logger.error(`Extended operations error: ${errMsg}`); 
+                    return { data: { data: [] } }; 
+                })
         ]);
 
-        // Calculate INIT_DEPOSIT from cached historical deposits and withdrawals
+        // Calculate INIT_DEPOSIT from fresh historical deposits and withdrawals
         let totalIn = 0, totalOut = 0;
-        const cachedDeposits = cached.deposits || [];
-        const cachedWithdrawals = cached.withdrawals || [];
-        for (const op of cachedDeposits) {
+        const freshOperations = operationsRes.data?.data || [];
+        
+        logger.info(`[Extended API Debug] Fresh Operations Count: ${freshOperations.length}`);
+        logger.info(`[Extended API Debug] Fresh Operations Data: ${JSON.stringify(freshOperations)}`);
+
+        const freshDeposits = freshOperations.filter(op => op.type === 'DEPOSIT' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
+        const freshWithdrawals = freshOperations.filter(op => op.type === 'WITHDRAWAL' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
+
+        for (const op of freshDeposits) {
             totalIn += Math.abs(parseFloat(op.amount || 0));
         }
-        for (const op of cachedWithdrawals) {
+        for (const op of freshWithdrawals) {
             totalOut += Math.abs(parseFloat(op.amount || 0));
         }
         const initDeposit = totalIn - totalOut;
@@ -278,14 +296,14 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
                 balance_fields: balData,
                 total_in: totalIn,
                 total_out: totalOut,
-                deposits_count: cachedDeposits.length,
-                withdrawals_count: cachedWithdrawals.length,
+                deposits_count: freshDeposits.length,
+                withdrawals_count: freshWithdrawals.length,
                 pnl_chart_points: pnlChart.length,
                 cached_last_sync: cached.lastSync
             }
         });
     } catch (error) {
-        logger.error('Extended Stats Error:', error.message);
+        logger.error('Extended Stats Error:', error.stack || error.message);
         res.status(500).json({ error: 'Failed to fetch Extended exchange data. Please try again.' });
     }
 });
@@ -313,6 +331,10 @@ const fetchAllExtendedPaginated = async (BASE, endpoint, cachedList = [], getUni
             let url = `${BASE}${endpoint}${endpoint.includes('?') ? '&' : '?'}limit=100`;
             if (cursor) url += `&cursor=${cursor}`;
             const r = await http.get(url, { headers });
+            if (endpoint.includes('assetOperations')) {
+                logger.info(`[Extended API Debug] URL: ${url}`);
+                logger.info(`[Extended API Debug] Response Data: ${JSON.stringify(r.data)}`);
+            }
             const records = r.data?.data || [];
             let added = 0;
 
@@ -337,6 +359,9 @@ const fetchAllExtendedPaginated = async (BASE, endpoint, cachedList = [], getUni
             cursor = next;
         } catch (e) {
             logger.error(`Extended pagination error [${endpoint}]:`, e.message);
+            if (endpoint.includes('assetOperations')) {
+                logger.error(`[Extended API Debug] Failed URL: ${BASE}${endpoint}`);
+            }
             break;
         }
     }
@@ -380,13 +405,16 @@ app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, valida
         logger.info(`Starting incremental history sync for Extended: ${entryId}`);
 
         // Fetch paginated history in parallel using incremental matching
-        const [trades, deposits, withdrawals, positions, orders] = await Promise.all([
+        // Fetch paginated history in parallel using incremental matching
+        const [trades, rawOperations, positions, orders] = await Promise.all([
             fetchAllExtendedPaginated(BASE, '/user/trades', cached.trades, t => t.id || JSON.stringify(t), () => true, headers),
-            fetchAllExtendedPaginated(BASE, '/user/assetOperations?type=DEPOSIT&status=COMPLETED', cached.deposits, op => op.id || JSON.stringify(op), () => true, headers),
-            fetchAllExtendedPaginated(BASE, '/user/assetOperations?type=WITHDRAWAL&status=COMPLETED', cached.withdrawals, op => op.id || JSON.stringify(op), () => true, headers),
+            fetchAllExtendedPaginated(BASE, '/user/assetOperations', [], op => op.id || JSON.stringify(op), () => true, headers),
             fetchAllExtendedPaginated(BASE, '/user/positions/history', cached.positions, p => p.id || JSON.stringify(p), () => true, headers),
             fetchAllExtendedPaginated(BASE, '/user/orders/history', cached.orders, o => o.id || JSON.stringify(o), o => ['FILLED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(o.status), headers)
         ]);
+
+        const deposits = rawOperations.filter(op => op.type === 'DEPOSIT' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
+        const withdrawals = rawOperations.filter(op => op.type === 'WITHDRAWAL' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
 
         // Save updated data to cache
         await store.set(cacheKey, {

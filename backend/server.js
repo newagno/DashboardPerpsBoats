@@ -27,6 +27,33 @@ const isProd = process.env.NODE_ENV === 'production';
 // Axios instance with global timeout (reduced for Vercel)
 const http = axios.create({ timeout: isProd ? 9000 : 60000 });
 
+// In-memory cache for Extended Exchange accountId per API key
+const extAccountIdCache = new Map();
+
+/**
+ * Dynamically fetches and caches the account ID for the Extended Exchange.
+ */
+async function getExtendedAccountId(BASE, headers, apiKey) {
+    if (extAccountIdCache.has(apiKey)) {
+        return extAccountIdCache.get(apiKey);
+    }
+    
+    try {
+        const res = await http.get(`${BASE}/user/accounts`, { headers });
+        const accounts = res.data?.data;
+        if (Array.isArray(accounts) && accounts.length > 0 && accounts[0].accountId) {
+            const accountId = accounts[0].accountId;
+            extAccountIdCache.set(apiKey, accountId);
+            return accountId;
+        }
+        throw new Error('No active account ID found in profile');
+    } catch (err) {
+        const errMsg = err.response?.data ? JSON.stringify(err.response.data) : err.message;
+        logger.error(`[Extended API] Failed to fetch accountId: ${errMsg}`);
+        throw new Error(`Failed to fetch accountId: ${errMsg}`);
+    }
+}
+
 // ── Security Headers ────────────────────────────────────────────────────────
 app.use(helmet({
     contentSecurityPolicy: {
@@ -164,6 +191,15 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
 
         const BASE = process.env.EXTENDED_API_URL || 'https://api.starknet.extended.exchange/api/v1';
 
+        // Get accountId dynamically (cached in-memory)
+        let accountId;
+        try {
+            accountId = await getExtendedAccountId(BASE, headers, apiKey);
+        } catch (err) {
+            logger.error('Extended accountId retrieval failed:', err.message);
+            return res.status(400).json({ error: `Failed to initialize Extended Exchange: ${err.message}` });
+        }
+
         // Load incremental stats from cache
         const cacheKey = `cache:extended:${entryId}`;
         const cached = await store.get(cacheKey) || {
@@ -180,20 +216,20 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
 
         // Fetch only current balances, earned rewards, leaderboard and PnL charts fresh (Non-paginated fast requests)
         const [balanceRes, pointsRes, leaderboardRes, pnlChartRes, operationsRes] = await Promise.all([
-            http.get(`${BASE}/user/balance`, { headers })
+            http.get(`${BASE}/user/balance?accountId=${accountId}`, { headers })
                 .catch(e => { errors.push(`balance: ${e.message}`); logger.error('Extended balance error:', e.message); return { data: {} }; }),
-            http.get(`${BASE}/user/rewards/earned`, { headers })
+            http.get(`${BASE}/user/rewards/earned?accountId=${accountId}`, { headers })
                 .catch(e => { errors.push(`points: ${e.message}`); logger.error('Extended points error:', e.message); return { data: { data: [] } }; }),
-            http.get(`${BASE}/user/rewards/leaderboard/stats`, { headers })
+            http.get(`${BASE}/user/rewards/leaderboard/stats?accountId=${accountId}`, { headers })
                 .catch(e => { errors.push(`leaderboard: ${e.message}`); logger.error('Extended leaderboard error:', e.message); return { data: { data: {} } }; }),
-            http.get(`${BASE}/portfolio/charts/pnl?interval=ALL&pnlType=TOTAL_PNL`, { headers })
+            http.get(`${BASE}/portfolio/charts/pnl?interval=ALL&pnlType=TOTAL_PNL&accountId=${accountId}`, { headers })
                 .catch(e => { 
                     const errMsg = e.response?.data ? JSON.stringify(e.response.data) : e.message;
                     errors.push(`pnlChart: ${errMsg}`); 
                     logger.error(`Extended pnlChart error: ${errMsg}`); 
                     return { data: { data: [] } }; 
                 }),
-            http.get(`${BASE}/user/assetOperations?limit=100`, { headers })
+            http.get(`${BASE}/user/asset-operations?accountId=${accountId}&limit=100`, { headers })
                 .catch(e => { 
                     const errMsg = e.response?.data ? JSON.stringify(e.response.data) : e.message;
                     errors.push(`operations: ${errMsg}`); 
@@ -205,9 +241,6 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
         // Calculate INIT_DEPOSIT from fresh historical deposits and withdrawals
         let totalIn = 0, totalOut = 0;
         const freshOperations = operationsRes.data?.data || [];
-        
-        logger.info(`[Extended API Debug] Fresh Operations Count: ${freshOperations.length}`);
-        logger.info(`[Extended API Debug] Fresh Operations Data: ${JSON.stringify(freshOperations)}`);
 
         const freshDeposits = freshOperations.filter(op => op.type === 'DEPOSIT' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
         const freshWithdrawals = freshOperations.filter(op => op.type === 'WITHDRAWAL' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
@@ -331,10 +364,6 @@ const fetchAllExtendedPaginated = async (BASE, endpoint, cachedList = [], getUni
             let url = `${BASE}${endpoint}${endpoint.includes('?') ? '&' : '?'}limit=100`;
             if (cursor) url += `&cursor=${cursor}`;
             const r = await http.get(url, { headers });
-            if (endpoint.includes('assetOperations')) {
-                logger.info(`[Extended API Debug] URL: ${url}`);
-                logger.info(`[Extended API Debug] Response Data: ${JSON.stringify(r.data)}`);
-            }
             const records = r.data?.data || [];
             let added = 0;
 
@@ -359,9 +388,6 @@ const fetchAllExtendedPaginated = async (BASE, endpoint, cachedList = [], getUni
             cursor = next;
         } catch (e) {
             logger.error(`Extended pagination error [${endpoint}]:`, e.message);
-            if (endpoint.includes('assetOperations')) {
-                logger.error(`[Extended API Debug] Failed URL: ${BASE}${endpoint}`);
-            }
             break;
         }
     }
@@ -392,6 +418,16 @@ app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, valida
         };
 
         const BASE = process.env.EXTENDED_API_URL || 'https://api.starknet.extended.exchange/api/v1';
+
+        // Get accountId dynamically (cached in-memory)
+        let accountId;
+        try {
+            accountId = await getExtendedAccountId(BASE, headers, apiKey);
+        } catch (err) {
+            logger.error('Extended sync accountId retrieval failed:', err.message);
+            return res.status(400).json({ error: `Failed to initialize Extended Exchange sync: ${err.message}` });
+        }
+
         const cacheKey = `cache:extended:${entryId}`;
         const cached = await store.get(cacheKey) || {
             trades: [],
@@ -402,15 +438,14 @@ app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, valida
             lastSync: 0
         };
 
-        logger.info(`Starting incremental history sync for Extended: ${entryId}`);
+        logger.info(`Starting incremental history sync for Extended: ${entryId} (accountId: ${accountId})`);
 
-        // Fetch paginated history in parallel using incremental matching
-        // Fetch paginated history in parallel using incremental matching
+        // Fetch paginated history in parallel using incremental matching and explicit accountId
         const [trades, rawOperations, positions, orders] = await Promise.all([
-            fetchAllExtendedPaginated(BASE, '/user/trades', cached.trades, t => t.id || JSON.stringify(t), () => true, headers),
-            fetchAllExtendedPaginated(BASE, '/user/assetOperations', [], op => op.id || JSON.stringify(op), () => true, headers),
-            fetchAllExtendedPaginated(BASE, '/user/positions/history', cached.positions, p => p.id || JSON.stringify(p), () => true, headers),
-            fetchAllExtendedPaginated(BASE, '/user/orders/history', cached.orders, o => o.id || JSON.stringify(o), o => ['FILLED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(o.status), headers)
+            fetchAllExtendedPaginated(BASE, `/user/trades?accountId=${accountId}`, cached.trades, t => t.id || JSON.stringify(t), () => true, headers),
+            fetchAllExtendedPaginated(BASE, `/user/asset-operations?accountId=${accountId}`, [], op => op.id || JSON.stringify(op), () => true, headers),
+            fetchAllExtendedPaginated(BASE, `/user/positions/history?accountId=${accountId}`, cached.positions, p => p.id || JSON.stringify(p), () => true, headers),
+            fetchAllExtendedPaginated(BASE, `/user/orders/history?accountId=${accountId}`, cached.orders, o => o.id || JSON.stringify(o), o => ['FILLED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(o.status), headers)
         ]);
 
         const deposits = rawOperations.filter(op => op.type === 'DEPOSIT' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));

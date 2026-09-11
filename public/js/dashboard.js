@@ -119,7 +119,10 @@ class DashboardManager {
             return;
         }
 
-        // Local-first: read exchanges directly from walletManager (localStorage)
+        // Sync active exchanges with server store for cross-device compatibility (e.g. mobile)
+        await window.walletManager.syncWithServer();
+
+        // Read exchanges directly from walletManager
         const hasExchanges = window.walletManager.state.activeExchanges.length > 0;
         if (hasExchanges) {
             this.renderLoading();

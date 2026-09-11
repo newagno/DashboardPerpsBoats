@@ -101,6 +101,36 @@ class WalletManager {
         } catch (e) {
             console.warn('Failed to save to localStorage:', e);
         }
+
+        // Persist activeExchanges to backend Redis for cross-device sync
+        fetch('/api/exchanges/state/save', {
+            method: 'POST',
+            headers: this._csrfHeaders,
+            body: JSON.stringify({ activeExchanges: this.state.activeExchanges })
+        }).catch(err => console.warn('Failed to sync activeExchanges to server:', err));
+    }
+
+    /** Sync active exchanges with server store for cross-device support (e.g. mobile) */
+    async syncWithServer() {
+        try {
+            const r = await fetch('/api/exchanges/state/get');
+            if (!r.ok) return false;
+            const data = await r.json();
+            if (data.success && Array.isArray(data.exchanges) && data.exchanges.length > 0) {
+                const serverStr = JSON.stringify(data.exchanges);
+                const localStr = JSON.stringify(this.state.activeExchanges);
+                if (serverStr !== localStr) {
+                    this.state.activeExchanges = data.exchanges;
+                    try {
+                        localStorage.setItem('wallet_state_exchanges_v3', serverStr);
+                    } catch (e) {}
+                    return true;
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to sync activeExchanges from server:', e);
+        }
+        return false;
     }
 
     // ── HttpOnly Cookie API Key Management ────────────────────────────────────

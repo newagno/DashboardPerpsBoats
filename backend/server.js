@@ -194,6 +194,31 @@ app.get('/api/exchanges/manual-override/get', async (req, res) => {
     }
 });
 
+// ─── Server-side Persistent Active Exchanges (Cross-device sync) ────────────
+app.post('/api/exchanges/state/save', csrfProtect, async (req, res) => {
+    try {
+        const { activeExchanges } = req.body;
+        if (!Array.isArray(activeExchanges)) {
+            return res.status(400).json({ error: 'activeExchanges must be an array' });
+        }
+        await store.set('global:active_exchanges', activeExchanges, 365 * 24 * 60 * 60);
+        logger.info(`Saved ${activeExchanges.length} active exchanges to server store`);
+        res.json({ success: true });
+    } catch (err) {
+        logger.error('Failed to save active exchanges:', err.message);
+        res.status(500).json({ error: 'Failed to save active exchanges' });
+    }
+});
+
+app.get('/api/exchanges/state/get', async (req, res) => {
+    try {
+        const exchanges = await store.get('global:active_exchanges') || [];
+        res.json({ success: true, exchanges });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ─── Proxy - Extended Exchange (Starknet) ────────────────────────────────────
 app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(schemas.extendedEntryIdSchema, 'body'), async (req, res) => {
     const errors = [];

@@ -330,9 +330,9 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
             if (storedOverride.rank !== undefined && storedOverride.rank !== null && storedOverride.rank !== '') {
                 rank = storedOverride.rank;
             }
-            if (storedOverride.initDeposit !== undefined) initDeposit = parseFloat(storedOverride.initDeposit);
-            if (storedOverride.actDeposit !== undefined) actDeposit = parseFloat(storedOverride.actDeposit);
-            if (storedOverride.volume !== undefined) finalVolume = parseFloat(storedOverride.volume);
+            if (storedOverride.initDeposit !== undefined && storedOverride.initDeposit !== null && storedOverride.initDeposit !== '') initDeposit = parseFloat(storedOverride.initDeposit);
+            if (storedOverride.actDeposit !== undefined && storedOverride.actDeposit !== null && storedOverride.actDeposit !== '') actDeposit = parseFloat(storedOverride.actDeposit);
+            if (storedOverride.volume !== undefined && storedOverride.volume !== null && storedOverride.volume !== '') finalVolume = parseFloat(storedOverride.volume);
         }
 
         // NATIVE PNL (from fresh pnl chart)
@@ -894,15 +894,15 @@ app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(s
             const storedOverride = await store.get(`override:${targetAddress.toLowerCase()}`);
             if (storedOverride) {
                 responseData.portfolio = responseData.portfolio || {};
-                if (storedOverride.actDeposit !== undefined) responseData.portfolio.act_deposit = parseFloat(storedOverride.actDeposit);
-                if (storedOverride.initDeposit !== undefined) responseData.portfolio.init_deposit = parseFloat(storedOverride.initDeposit);
-                if (storedOverride.volume !== undefined) responseData.portfolio.volume = parseFloat(storedOverride.volume);
-                if (storedOverride.winRate !== undefined) responseData.portfolio.win_rate = parseFloat(storedOverride.winRate);
-                if (storedOverride.roi !== undefined) responseData.portfolio.roi = parseFloat(storedOverride.roi);
+                if (storedOverride.actDeposit !== undefined && storedOverride.actDeposit !== null && storedOverride.actDeposit !== '') responseData.portfolio.act_deposit = parseFloat(storedOverride.actDeposit);
+                if (storedOverride.initDeposit !== undefined && storedOverride.initDeposit !== null && storedOverride.initDeposit !== '') responseData.portfolio.init_deposit = parseFloat(storedOverride.initDeposit);
+                if (storedOverride.volume !== undefined && storedOverride.volume !== null && storedOverride.volume !== '') responseData.portfolio.volume = parseFloat(storedOverride.volume);
+                if (storedOverride.winRate !== undefined && storedOverride.winRate !== null && storedOverride.winRate !== '') responseData.portfolio.win_rate = parseFloat(storedOverride.winRate);
+                if (storedOverride.roi !== undefined && storedOverride.roi !== null && storedOverride.roi !== '') responseData.portfolio.roi = parseFloat(storedOverride.roi);
                 
                 responseData.points = responseData.points || {};
-                if (storedOverride.points !== undefined) responseData.points.total_points = parseFloat(storedOverride.points);
-                if (storedOverride.rank !== undefined) responseData.points.rank = storedOverride.rank;
+                if (storedOverride.points !== undefined && storedOverride.points !== null && storedOverride.points !== '') responseData.points.total_points = parseFloat(storedOverride.points);
+                if (storedOverride.rank !== undefined && storedOverride.rank !== null && storedOverride.rank !== '') responseData.points.rank = storedOverride.rank;
             }
         }
 

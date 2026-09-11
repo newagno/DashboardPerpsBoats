@@ -800,7 +800,6 @@ app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(s
                 total_points: 66.63,
                 rank: 14091
             };
-            return res.json(responseData);
         }
 
         if (vrToken) {

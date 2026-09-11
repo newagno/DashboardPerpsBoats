@@ -760,13 +760,20 @@ class DashboardManager {
         const labelEl = document.getElementById('edit-var-label');
         if (labelEl) labelEl.value = entry.label || '';
         document.getElementById('edit-var-wallet-address').value = entry.walletAddress || '';
-        document.getElementById('edit-var-init-deposit').value = md.initDeposit !== undefined ? md.initDeposit : (cardData.initDeposit || '');
-        document.getElementById('edit-var-act-deposit').value = md.actDeposit !== undefined ? md.actDeposit : (cardData.actDeposit || '');
-        document.getElementById('edit-var-volume').value = md.volume !== undefined ? md.volume : (cardData.volume || '');
-        document.getElementById('edit-var-points').value = md.points !== undefined ? md.points : (cardData.points || '');
-        document.getElementById('edit-var-rank').value = md.rank !== undefined ? md.rank : (cardData.rank || '');
-        document.getElementById('edit-var-win-rate').value = md.winRate !== undefined ? md.winRate : (cardData.winRate || '');
-        document.getElementById('edit-var-roi').value = md.roi !== undefined ? md.roi : (cardData.roi || '');
+        
+        const setInput = (inputId, mdValue, apiValue) => {
+            const el = document.getElementById(inputId);
+            el.value = (mdValue !== undefined && mdValue !== null) ? mdValue : '';
+            el.placeholder = `API: ${apiValue !== undefined ? apiValue : ''}`;
+        };
+
+        setInput('edit-var-init-deposit', md.initDeposit, cardData.initDeposit);
+        setInput('edit-var-act-deposit', md.actDeposit, cardData.actDeposit);
+        setInput('edit-var-volume', md.volume, cardData.volume);
+        setInput('edit-var-points', md.points, cardData.points);
+        setInput('edit-var-rank', md.rank, cardData.rank);
+        setInput('edit-var-win-rate', md.winRate, cardData.winRate);
+        setInput('edit-var-roi', md.roi, cardData.roi);
 
         const modalTitle = document.querySelector('#modal-edit-variational .modal-header h3');
         if (modalTitle) {
@@ -787,14 +794,21 @@ class DashboardManager {
         const entry = window.walletManager.state.activeExchanges.find(e => e.id === id);
         const exchange = entry ? entry.exchange : 'variational';
 
+        const parseInput = (inputId) => {
+            const val = document.getElementById(inputId).value.trim();
+            if (val === '') return null;
+            const num = parseFloat(val);
+            return isNaN(num) ? null : num;
+        };
+
         const manualData = {
-            initDeposit: parseFloat(document.getElementById('edit-var-init-deposit').value) || 0,
-            actDeposit: parseFloat(document.getElementById('edit-var-act-deposit').value) || 0,
-            volume: parseFloat(document.getElementById('edit-var-volume').value) || 0,
-            points: parseFloat(document.getElementById('edit-var-points').value) || 0,
+            initDeposit: parseInput('edit-var-init-deposit'),
+            actDeposit: parseInput('edit-var-act-deposit'),
+            volume: parseInput('edit-var-volume'),
+            points: parseInput('edit-var-points'),
             rank: document.getElementById('edit-var-rank').value.trim() || null,
-            winRate: parseFloat(document.getElementById('edit-var-win-rate').value) || 0,
-            roi: parseFloat(document.getElementById('edit-var-roi').value) || 0
+            winRate: parseInput('edit-var-win-rate'),
+            roi: parseInput('edit-var-roi')
         };
 
         // 1. Update local state

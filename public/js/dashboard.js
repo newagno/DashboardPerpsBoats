@@ -625,7 +625,7 @@ class DashboardManager {
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_pnl') : '06 // PNL'}</span><span class="stat-value val-pnl ${pnlClass}">${window.Utils.formatCurrency(data.pnl)}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_win_rate') : '07 // WIN_RATE'}</span><span class="stat-value val-win-rate">${window.Utils.formatPercent(data.winRate)}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_roi') : '08 // ROI'}</span><span class="stat-value val-roi ${roiClass}">${window.Utils.formatPercent(roi)}</span></div>
-                <div class="wallet-stat" style="border-top: 1px dashed rgba(255,72,54,0.3); margin-top:2px;"><span class="stat-label" style="color: rgba(255,72,54,0.7);">${window.i18n ? window.i18n.t('card_point_value') : '09 // $/POINT'}</span><span class="stat-value val-point-value ${pnlClass}" style="font-size:12px;">${pointValueText || pointValue}</span></div>
+                <div class="wallet-stat" style="border-top: 1px dashed rgba(255,72,54,0.3); margin-top:2px;"><span class="stat-label" style="color: rgba(255,72,54,0.7);">${window.i18n ? window.i18n.t('card_point_value') : '09 // $/POINT'}</span><span class="stat-value val-point-value ${pnlClass}" style="font-size:12px;">${pointValue}</span></div>
             </div>
             <div class="wallet-footer">
                 <span class="timestamp">${footerTimestamp}</span>

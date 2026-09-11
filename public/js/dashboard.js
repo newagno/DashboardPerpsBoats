@@ -604,10 +604,8 @@ class DashboardManager {
             footerTimestamp = `Last sync: ${new Date().toLocaleTimeString()}`;
         }
 
-        // Edit button (only for Variational)
-        const editBtnHtml = (exchange === 'variational')
-            ? `<button title="${window.i18n ? window.i18n.t('var_edit_btn') : 'Edit data'}" onclick="window.dashboardMgr.openEditVariational('${id}')" style="background:transparent;border:none;padding:2px;display:flex;align-items:center;color:#888;cursor:pointer;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#888'"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>`
-            : '';
+        // Edit button (available on all exchange cards)
+        const editBtnHtml = `<button title="${window.i18n ? window.i18n.t('var_edit_btn') : 'Edit data'}" onclick="window.dashboardMgr.openEditCard('${id}')" style="background:transparent;border:none;padding:2px;display:flex;align-items:center;color:#888;cursor:pointer;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#888'"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>`;
 
         let roi = 0;
         if (exchange === 'variational' && data.roi !== undefined && data.roi !== null) {
@@ -743,20 +741,31 @@ class DashboardManager {
     }
 
     // ── Variational Edit Modal ─────────────────────────────────────────────
-    openEditVariational(id) {
+    openEditCard(id) {
         const entry = window.walletManager.state.activeExchanges.find(e => e.id === id);
-        if (!entry || entry.exchange !== 'variational') return;
+        if (!entry) return;
+        const cardData = this.walletData[id] || {};
         const md = entry.manualData || {};
+
         document.getElementById('edit-var-id').value = id;
         document.getElementById('edit-var-wallet-address').value = entry.walletAddress || '';
-        document.getElementById('edit-var-init-deposit').value = md.initDeposit || '';
-        document.getElementById('edit-var-act-deposit').value = md.actDeposit || '';
-        document.getElementById('edit-var-volume').value = md.volume || '';
-        document.getElementById('edit-var-points').value = md.points || '';
-        document.getElementById('edit-var-rank').value = md.rank || '';
-        document.getElementById('edit-var-win-rate').value = md.winRate || '';
-        document.getElementById('edit-var-roi').value = md.roi || '';
+        document.getElementById('edit-var-init-deposit').value = md.initDeposit !== undefined ? md.initDeposit : (cardData.initDeposit || '');
+        document.getElementById('edit-var-act-deposit').value = md.actDeposit !== undefined ? md.actDeposit : (cardData.actDeposit || '');
+        document.getElementById('edit-var-volume').value = md.volume !== undefined ? md.volume : (cardData.volume || '');
+        document.getElementById('edit-var-points').value = md.points !== undefined ? md.points : (cardData.points || '');
+        document.getElementById('edit-var-rank').value = md.rank !== undefined ? md.rank : (cardData.rank || '');
+        document.getElementById('edit-var-win-rate').value = md.winRate !== undefined ? md.winRate : (cardData.winRate || '');
+        document.getElementById('edit-var-roi').value = md.roi !== undefined ? md.roi : (cardData.roi || '');
+
+        const modalTitle = document.querySelector('#modal-edit-variational .modal-header h3');
+        if (modalTitle) {
+            modalTitle.textContent = `${entry.exchange.toUpperCase()} / EDIT_DATA`;
+        }
         document.getElementById('modal-edit-variational').style.display = 'flex';
+    }
+
+    openEditVariational(id) {
+        this.openEditCard(id);
     }
 
     saveVariationalEdit() {
@@ -772,7 +781,7 @@ class DashboardManager {
             winRate: parseFloat(document.getElementById('edit-var-win-rate').value) || 0,
             roi: parseFloat(document.getElementById('edit-var-roi').value) || 0
         };
-        window.walletManager.updateVariationalManual(id, manualData, walletAddress);
+        window.walletManager.updateManualData(id, manualData, walletAddress);
         document.getElementById('modal-edit-variational').style.display = 'none';
         window.refreshEngine.refresh();
     }

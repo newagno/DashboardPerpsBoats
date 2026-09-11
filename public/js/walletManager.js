@@ -172,19 +172,23 @@ class WalletManager {
     }
 
     /**
-     * Update manual data for an existing Variational entry.
+     * Update manual data for an existing exchange entry (Variational, Nado, Extended).
      * @param {string} id - entry id
      * @param {object} manualData - updated stats
      * @param {string|null} walletAddress - optional updated wallet address
      */
-    updateVariationalManual(id, manualData, walletAddress = null) {
+    updateManualData(id, manualData, walletAddress = null) {
         const entry = this.state.activeExchanges.find(e => e.id === id);
-        if (!entry || entry.exchange !== 'variational') return false;
-        entry.manualData = { ...manualData, inputDate: Date.now() };
+        if (!entry) return false;
+        entry.manualData = { ...(entry.manualData || {}), ...manualData, inputDate: Date.now() };
         if (walletAddress !== null) entry.walletAddress = walletAddress;
         entry.updatedAt = new Date().toISOString();
         this._saveExchanges();
         return true;
+    }
+
+    updateVariationalManual(id, manualData, walletAddress = null) {
+        return this.updateManualData(id, manualData, walletAddress);
     }
 
     /**

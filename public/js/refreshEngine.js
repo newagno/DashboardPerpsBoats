@@ -97,10 +97,18 @@ class RefreshEngine {
                         // Pass null as key — backend reads it from the Vault using entryId
                         const obj = new window.Exchanges.Extended(null, id);
                         data = await obj.getStats(signal);
+                        if (entry.manualData) {
+                            if (entry.manualData.points !== undefined && entry.manualData.points !== null && entry.manualData.points !== '') data.points = entry.manualData.points;
+                            if (entry.manualData.rank !== undefined && entry.manualData.rank !== null && entry.manualData.rank !== '') data.rank = entry.manualData.rank;
+                        }
                     } else if (exchange === 'nado') {
                         // Pass walletAddress as 'walletAddress' so server uses that specific address
                         const obj = new window.Exchanges.Nado(effectiveAddress);
                         data = await obj.getStats(signal);
+                        if (entry.manualData) {
+                            if (entry.manualData.points !== undefined && entry.manualData.points !== null && entry.manualData.points !== '') data.points = entry.manualData.points;
+                            if (entry.manualData.rank !== undefined && entry.manualData.rank !== null && entry.manualData.rank !== '') data.rank = entry.manualData.rank;
+                        }
                     } else if (exchange === 'variational') {
                         // Manual data short-circuit — no API call, read from stored entry
                         if (!entry.manualData) {

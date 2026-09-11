@@ -110,12 +110,25 @@ class WalletManager {
         }).catch(err => console.warn('Failed to sync activeExchanges to server:', err));
     }
 
-    /** Sync active exchanges with server store for cross-device support (e.g. mobile) */
     async syncWithServer() {
         try {
             const r = await fetch('/api/exchanges/state/get');
             if (!r.ok) return false;
             const data = await r.json();
+            
+            // Server is empty, but Local has exchanges -> Push to server
+            if (data.success && (!Array.isArray(data.exchanges) || data.exchanges.length === 0)) {
+                if (this.state.activeExchanges.length > 0) {
+                    console.log('Server store is empty. Pushing local exchanges to server...');
+                    fetch('/api/exchanges/state/save', {
+                        method: 'POST',
+                        headers: this._csrfHeaders,
+                        body: JSON.stringify({ activeExchanges: this.state.activeExchanges })
+                    }).catch(err => console.warn('Failed to push to server:', err));
+                }
+                return false;
+            }
+
             if (data.success && Array.isArray(data.exchanges) && data.exchanges.length > 0) {
                 const serverStr = JSON.stringify(data.exchanges);
                 const localStr = JSON.stringify(this.state.activeExchanges);

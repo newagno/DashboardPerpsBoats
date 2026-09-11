@@ -792,7 +792,8 @@ class DashboardManager {
 
         if (exchange === 'nado') {
             const ptsVal = rawData.points?.points || rawData.points || 0;
-            d.points = Math.round(parseFloat(ptsVal) / 1e18);
+            const parsedPts = parseFloat(ptsVal);
+            d.points = parsedPts > 1e9 ? Math.round(parsedPts / 1e18) : parsedPts;
         } else {
             if (Array.isArray(rawData.points)) {
                 d.points = rawData.points.reduce((sum, p) => sum + parseFloat(p.amount || p.points || p.reward || p.value || 0), 0);

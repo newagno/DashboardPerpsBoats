@@ -296,11 +296,11 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
         for (const op of freshWithdrawals) {
             totalOut += Math.abs(parseFloat(op.amount || 0));
         }
-        const initDeposit = totalIn - totalOut;
+        let initDeposit = totalIn - totalOut;
 
         // Fresh ACT_DEPOSIT
         const balData = balanceRes.data?.data || balanceRes.data || {};
-        const actDeposit = parseFloat(balData.equity ?? balData.balance ?? 0);
+        let actDeposit = parseFloat(balData.equity ?? balData.balance ?? 0);
 
         // Calculate VOLUME from cached trades and orders
         let volumeFromTrades = 0;
@@ -602,7 +602,8 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, validate(schemas.
             const post = BigInt(ev.post_balance?.spot?.balance?.amount || 0);
             initDepositFromEvents += Number(post - pre) / 1e18;
         }
-        const initDeposit = evts.length > 0 ? initDepositFromEvents : initDepositFromSnap;
+        const initDepositCalc = evts.length > 0 ? initDepositFromEvents : initDepositFromSnap;
+        let initDeposit = initDepositCalc;
 
         // Parse Unrealized PnL (Native PnL)
         let nativeTotalPnl = 0;
@@ -620,7 +621,7 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, validate(schemas.
         }
 
         // Total Active Deposit (Equity) = Settled Spot + Unrealized PnL
-        const fullEquity = totalEquity + nativeTotalPnl;
+        let fullEquity = totalEquity + nativeTotalPnl;
 
         // Calculate Win Rate & realized PNL from cached historical orders
         const cachedOrders = cached.orders || [];

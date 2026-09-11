@@ -644,8 +644,13 @@ class DashboardManager {
         const prevStatus = existingCard.dataset.status || 'unknown';
         const nextStatus = success ? 'success' : 'error';
 
-        // If success status changed, a full structural re-render is required
-        if (prevStatus !== 'unknown' && prevStatus !== nextStatus) {
+        const entry = window.walletManager.state.activeExchanges.find(e => e.id === id);
+        const currentSafeLabel = (entry && entry.label && entry.label.trim() !== '' && entry.label.trim().toLowerCase() !== exchange) ? entry.label.trim() : '';
+        const prevLabelEl = existingCard.querySelector('.card-label');
+        const prevLabel = prevLabelEl ? prevLabelEl.textContent : '';
+
+        // If success status changed OR label changed, a full structural re-render is required
+        if ((prevStatus !== 'unknown' && prevStatus !== nextStatus) || prevLabel !== currentSafeLabel) {
             const freshCard = this.createExchangeCard(res);
             existingCard.innerHTML = freshCard.innerHTML;
             existingCard.dataset.status = nextStatus;

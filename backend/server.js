@@ -14,13 +14,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
-// ── Initialize Redis (async, blocking) ──────────────────────────────────────
+// ── Initialize Cache ────────────────────────────────────────────────────────
 (async () => {
     try {
         await store.initRedis();
     } catch (err) {
-        logger.error('CRITICAL: Redis initialization failed. Server cannot start.', err);
-        process.exit(1);
+        logger.warn('Redis initialization failed/skipped. Falling back to In-Memory cache.');
     }
 })();
 
@@ -103,25 +102,14 @@ app.use(express.json());
 app.use(cookieParser());
 
 // ── Rate Limiting ───────────────────────────────────────────────────────────
-const { RedisStore } = require('rate-limit-redis');
-
-
+// MemoryStore is the default for express-rate-limit.
+// On Vercel, rate limiting is mostly handled by Edge network anyway.
 const apiLimiter = rateLimit({
     windowMs: 1 * 60 * 1000,  // 1 minute
     max: 60,                   // 60 requests per minute
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Too many requests. Slow down.' },
-    store: new RedisStore({
-        sendCommand: (...args) => {
-            const client = store.getClient();
-            if (client) {
-                return client.call(...args);
-            }
-            logger.warn('Redis client not ready/available for API rate limiter, falling back to memory degradation mode');
-            return Promise.resolve();
-        }
-    })
+    message: { error: 'Too many requests. Slow down.' }
 });
 
 // ── CSRF Protection (custom header check for API routes) ────────────────────

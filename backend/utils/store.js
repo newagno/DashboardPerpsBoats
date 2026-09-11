@@ -1,6 +1,7 @@
 /**
- * KeyValueStore — abstracts session/nonce storage.
- * Completely relies on Redis (ioredis) as a strict dependency.
+ * KeyValueStore — abstracts session/nonce/history storage.
+ * Optionally uses Redis if REDIS_URL is provided and works.
+ * Falls back to an In-Memory Map cache to prevent server crashes.
  *
  * All values are stored as JSON strings with optional TTL (seconds).
  */
@@ -8,22 +9,26 @@ const logger = require('./logger');
 
 let redisClient = null;
 
+// In-Memory Fallback Cache
+const memoryCache = new Map();
+
 // ── Redis initialization ──────────────────────────────────────────────────────
 async function initRedis() {
     if (!process.env.REDIS_URL) {
-        throw new Error('REDIS_URL environment variable is not defined.');
+        logger.warn('REDIS_URL is not defined. Using In-Memory cache fallback.');
+        return false;
     }
 
     try {
         const Redis = require('ioredis');
         redisClient = new Redis(process.env.REDIS_URL, {
-            maxRetriesPerRequest: 3,
+            maxRetriesPerRequest: 2,
             retryStrategy(times) {
-                if (times > 5) return null; // stop retrying
-                return Math.min(times * 200, 2000);
+                if (times > 3) return null; // stop retrying quickly
+                return Math.min(times * 100, 1000);
             },
             enableReadyCheck: true,
-            connectTimeout: 5000,
+            connectTimeout: 3000,
             lazyConnect: true
         });
 
@@ -36,7 +41,8 @@ async function initRedis() {
             try { await redisClient.quit(); } catch(_) {}
         }
         redisClient = null;
-        throw new Error(`Redis connection failed: ${err.message}`);
+        logger.warn(`Redis connection failed: ${err.message}. Using In-Memory cache fallback.`);
+        return false;
     }
 }
 
@@ -44,56 +50,89 @@ async function initRedis() {
 
 /**
  * Get a value by key.
- * @param {string} key
- * @returns {Promise<any|null>}
  */
 async function get(key) {
-    if (!redisClient) {
-        throw new Error('Redis client is not initialized.');
+    if (redisClient) {
+        try {
+            const val = await redisClient.get(key);
+            return val ? JSON.parse(val) : null;
+        } catch (err) {
+            logger.error(`Redis GET error for key ${key}:`, err.message);
+        }
     }
-    const val = await redisClient.get(key);
-    return val ? JSON.parse(val) : null;
+    
+    // Fallback to memory
+    const item = memoryCache.get(key);
+    if (item) {
+        if (item.expiresAt && Date.now() > item.expiresAt) {
+            memoryCache.delete(key);
+            return null;
+        }
+        return item.value;
+    }
+    return null;
 }
 
 /**
  * Set a value with optional TTL (in seconds).
- * @param {string} key
- * @param {any} value
- * @param {number|null} ttlSeconds
  */
 async function set(key, value, ttlSeconds = null) {
-    if (!redisClient) {
-        throw new Error('Redis client is not initialized.');
-    }
     const serialized = JSON.stringify(value);
-    if (ttlSeconds) {
-        await redisClient.setex(key, ttlSeconds, serialized);
-    } else {
-        await redisClient.set(key, serialized);
+    
+    if (redisClient) {
+        try {
+            if (ttlSeconds) {
+                await redisClient.setex(key, ttlSeconds, serialized);
+            } else {
+                await redisClient.set(key, serialized);
+            }
+            return;
+        } catch (err) {
+            logger.error(`Redis SET error for key ${key}:`, err.message);
+        }
     }
+    
+    // Fallback to memory
+    const expiresAt = ttlSeconds ? Date.now() + (ttlSeconds * 1000) : null;
+    memoryCache.set(key, { value, expiresAt });
 }
 
 /**
  * Delete a key.
- * @param {string} key
  */
 async function del(key) {
-    if (!redisClient) {
-        throw new Error('Redis client is not initialized.');
+    if (redisClient) {
+        try {
+            await redisClient.del(key);
+        } catch (err) {
+            logger.error(`Redis DEL error for key ${key}:`, err.message);
+        }
     }
-    await redisClient.del(key);
+    memoryCache.delete(key);
 }
 
 /**
  * Check if key exists.
- * @param {string} key
- * @returns {Promise<boolean>}
  */
 async function exists(key) {
-    if (!redisClient) {
-        throw new Error('Redis client is not initialized.');
+    if (redisClient) {
+        try {
+            return (await redisClient.exists(key)) === 1;
+        } catch (err) {
+            logger.error(`Redis EXISTS error for key ${key}:`, err.message);
+        }
     }
-    return (await redisClient.exists(key)) === 1;
+    
+    // Check memory
+    if (memoryCache.has(key)) {
+        const item = memoryCache.get(key);
+        if (item.expiresAt && Date.now() > item.expiresAt) {
+            memoryCache.delete(key);
+            return false;
+        }
+        return true;
+    }
+    return false;
 }
 
 module.exports = {

@@ -14,14 +14,15 @@ const memoryCache = new Map();
 
 // ── Redis initialization ──────────────────────────────────────────────────────
 async function initRedis() {
-    if (!process.env.REDIS_URL) {
-        logger.warn('REDIS_URL is not defined. Using In-Memory cache fallback.');
+    const connectionUrl = process.env.REDIS_URL || process.env.KV_URL;
+    if (!connectionUrl) {
+        logger.warn('REDIS_URL / KV_URL is not defined. Using In-Memory cache fallback.');
         return false;
     }
 
     try {
         const Redis = require('ioredis');
-        redisClient = new Redis(process.env.REDIS_URL, {
+        redisClient = new Redis(connectionUrl, {
             maxRetriesPerRequest: 2,
             retryStrategy(times) {
                 if (times > 3) return null; // stop retrying quickly

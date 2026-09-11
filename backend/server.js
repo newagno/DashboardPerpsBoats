@@ -883,6 +883,9 @@ app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(s
                 logger.info('[Variational] Points:', JSON.stringify(responseData.points));
             }
         } else {
+            logger.warn('[Variational] No vr-token cookie - returning platform stats only');
+        }
+
         // Check server-side stored manual override for cross-device sync
         if (targetAddress) {
             const storedOverride = await store.get(`override:${targetAddress.toLowerCase()}`);
@@ -899,6 +902,7 @@ app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(s
                 if (storedOverride.rank !== undefined) responseData.points.rank = storedOverride.rank;
             }
         }
+
 
         res.json(responseData);
     } catch (error) {

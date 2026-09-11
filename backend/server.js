@@ -25,7 +25,10 @@ const isProd = process.env.NODE_ENV === 'production';
 })();
 
 // Axios instance with global timeout (reduced for Vercel)
-const http = axios.create({ timeout: isProd ? 9000 : 60000 });
+const http = axios.create({ 
+    timeout: isProd ? 9000 : 60000,
+    headers: { 'Accept-Encoding': 'gzip, deflate, br' }
+});
 
 // In-memory cache for Extended Exchange accountId per API key
 const extAccountIdCache = new Map();

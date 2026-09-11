@@ -621,6 +621,10 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, validate(schemas.
             if (!rank) rank = '4,761';
         }
         
+        let finalVolume = totalVolumeFromSnap;
+        // PNL = Realized from trades + Unrealized PNL (matches UI "All Time Account PnL" better than net deposits if events are missing)
+        let finalPnl    = pnlFromTrades + nativeTotalPnl;
+
         // Check server-side stored manual override for cross-device sync
         const storedOverride = await store.get(`override:${targetAddress.toLowerCase()}`);
         if (storedOverride) {
@@ -630,6 +634,10 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, validate(schemas.
             if (storedOverride.rank !== undefined && storedOverride.rank !== null && storedOverride.rank !== '') {
                 rank = storedOverride.rank;
             }
+            if (storedOverride.initDeposit !== undefined && storedOverride.initDeposit !== null && storedOverride.initDeposit !== '') initDeposit = parseFloat(storedOverride.initDeposit);
+            if (storedOverride.actDeposit !== undefined && storedOverride.actDeposit !== null && storedOverride.actDeposit !== '') fullEquity = parseFloat(storedOverride.actDeposit);
+            if (storedOverride.volume !== undefined && storedOverride.volume !== null && storedOverride.volume !== '') finalVolume = parseFloat(storedOverride.volume);
+            if (storedOverride.pnl !== undefined && storedOverride.pnl !== null && storedOverride.pnl !== '') finalPnl = parseFloat(storedOverride.pnl);
         }
 
         if (req.body.manualPoints !== undefined && req.body.manualPoints !== null && req.body.manualPoints !== '') {
@@ -638,10 +646,6 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, validate(schemas.
         if (req.body.manualRank !== undefined && req.body.manualRank !== null && req.body.manualRank !== '') {
             rank = req.body.manualRank;
         }
-
-        const finalVolume = totalVolumeFromSnap;
-        // PNL = Realized from trades + Unrealized PNL (matches UI "All Time Account PnL" better than net deposits if events are missing)
-        const finalPnl    = pnlFromTrades + nativeTotalPnl;
 
         res.json({
             snapshot: { assets: fullEquity },

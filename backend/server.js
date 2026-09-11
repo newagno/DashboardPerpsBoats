@@ -477,10 +477,10 @@ app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, valida
 
         // Fetch paginated history in parallel using incremental matching and explicit accountId
         const [trades, rawOperations, positions, orders] = await Promise.all([
-            fetchAllExtendedPaginated(BASE, `/user/trades?accountId=${accountId}`, cached.trades, t => t.id || JSON.stringify(t), () => true, headers),
-            fetchAllExtendedPaginated(BASE, `/user/asset-operations?accountId=${accountId}`, [], op => op.id || JSON.stringify(op), () => true, headers),
-            fetchAllExtendedPaginated(BASE, `/user/positions/history?accountId=${accountId}`, cached.positions, p => p.id || JSON.stringify(p), () => true, headers),
-            fetchAllExtendedPaginated(BASE, `/user/orders/history?accountId=${accountId}`, cached.orders, o => o.id || JSON.stringify(o), o => ['FILLED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(o.status), headers)
+            fetchAllExtendedPaginated(BASE, `/user/trades?accountId=${accountId}&startTime=0`, cached.trades, t => t.id || JSON.stringify(t), () => true, headers),
+            fetchAllExtendedPaginated(BASE, `/user/asset-operations?accountId=${accountId}&startTime=0`, [], op => op.id || JSON.stringify(op), () => true, headers),
+            fetchAllExtendedPaginated(BASE, `/user/positions/history?accountId=${accountId}&startTime=0`, cached.positions, p => p.id || JSON.stringify(p), () => true, headers),
+            fetchAllExtendedPaginated(BASE, `/user/orders/history?accountId=${accountId}&startTime=0`, cached.orders, o => o.id || JSON.stringify(o), o => ['FILLED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(o.status), headers)
         ]);
 
         const deposits = rawOperations.filter(op => op.type === 'DEPOSIT' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));

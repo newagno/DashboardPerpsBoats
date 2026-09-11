@@ -27,23 +27,33 @@ class WalletManager {
         };
 
         // Cross-tab synchronization via BroadcastChannel
-        this._syncChannel = new BroadcastChannel('wallet_state_sync');
-        this._syncChannel.onmessage = (event) => {
-            if (event.data && event.data.type === 'EXCHANGES_UPDATED' && event.data.payload) {
-                const localStr = JSON.stringify(this.state.activeExchanges);
-                const incomingStr = JSON.stringify(event.data.payload);
-                if (localStr !== incomingStr) {
-                    this.state.activeExchanges = event.data.payload;
-                    window.dispatchEvent(new CustomEvent('exchanges-synced', { detail: event.data.payload }));
+        try {
+            this._syncChannel = new BroadcastChannel('wallet_state_sync');
+            this._syncChannel.onmessage = (event) => {
+                if (event.data && event.data.type === 'EXCHANGES_UPDATED' && event.data.payload) {
+                    const localStr = JSON.stringify(this.state.activeExchanges);
+                    const incomingStr = JSON.stringify(event.data.payload);
+                    if (localStr !== incomingStr) {
+                        this.state.activeExchanges = event.data.payload;
+                        window.dispatchEvent(new CustomEvent('exchanges-synced', { detail: event.data.payload }));
+                    }
                 }
-            }
-        };
+            };
+        } catch (e) {
+            console.warn('BroadcastChannel not supported or failed to init:', e);
+            this._syncChannel = null;
+        }
 
         this.init();
     }
 
     init() {
-        const savedExchanges = localStorage.getItem('wallet_state_exchanges_v3');
+        let savedExchanges = null;
+        try {
+            savedExchanges = localStorage.getItem('wallet_state_exchanges_v3');
+        } catch (e) {
+            console.warn('localStorage access denied or failed:', e);
+        }
 
         if (savedExchanges) {
             try { this.state.activeExchanges = JSON.parse(savedExchanges); } catch (e) { }
@@ -80,12 +90,16 @@ class WalletManager {
     }
 
     _saveExchanges() {
-        localStorage.setItem('wallet_state_exchanges_v3', JSON.stringify(this.state.activeExchanges));
-        if (this._syncChannel) {
-            this._syncChannel.postMessage({
-                type: 'EXCHANGES_UPDATED',
-                payload: this.state.activeExchanges
-            });
+        try {
+            localStorage.setItem('wallet_state_exchanges_v3', JSON.stringify(this.state.activeExchanges));
+            if (this._syncChannel) {
+                this._syncChannel.postMessage({
+                    type: 'EXCHANGES_UPDATED',
+                    payload: this.state.activeExchanges
+                });
+            }
+        } catch (e) {
+            console.warn('Failed to save to localStorage:', e);
         }
     }
 

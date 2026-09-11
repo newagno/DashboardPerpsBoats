@@ -169,7 +169,11 @@ const translations = {
 
 class I18nManager {
     constructor() {
-        this.lang = localStorage.getItem('lang') || 'en';
+        try {
+            this.lang = localStorage.getItem('lang') || 'en';
+        } catch (e) {
+            this.lang = 'en';
+        }
         this.initElements();
         this.applyTranslations();
     }
@@ -180,7 +184,9 @@ class I18nManager {
 
     setLanguage(lang) {
         this.lang = lang;
-        localStorage.setItem('lang', lang);
+        try {
+            localStorage.setItem('lang', lang);
+        } catch (e) {}
         this.applyTranslations();
         document.getElementById('lang-toggle').textContent = lang === 'en' ? 'ENG' : 'UKR';
     }

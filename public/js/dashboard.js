@@ -586,7 +586,7 @@ class DashboardManager {
         let pointValue = 'FREE';
         if (data.points && data.points > 0) {
             if (data.pnl < 0) {
-                pointValue = `$${(Math.abs(data.pnl) / data.points).toFixed(4)}`;
+                pointValue = `-$${(Math.abs(data.pnl) / data.points).toFixed(4)}`;
             } else {
                 pointValue = `+$${(data.pnl / data.points).toFixed(4)}`; // earning per point
             }
@@ -625,7 +625,7 @@ class DashboardManager {
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_pnl') : '06 // PNL'}</span><span class="stat-value val-pnl ${pnlClass}">${window.Utils.formatCurrency(data.pnl)}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_win_rate') : '07 // WIN_RATE'}</span><span class="stat-value val-win-rate">${window.Utils.formatPercent(data.winRate)}</span></div>
                 <div class="wallet-stat"><span class="stat-label">${window.i18n ? window.i18n.t('card_roi') : '08 // ROI'}</span><span class="stat-value val-roi ${roiClass}">${window.Utils.formatPercent(roi)}</span></div>
-                <div class="wallet-stat" style="border-top: 1px dashed rgba(255,72,54,0.3); margin-top:2px;"><span class="stat-label" style="color: rgba(255,72,54,0.7);">${window.i18n ? window.i18n.t('card_point_value') : '09 // $/POINT'}</span><span class="stat-value val-point-value" style="color: rgba(255,72,54,0.9); font-size:12px;">${pointValue}</span></div>
+                <div class="wallet-stat" style="border-top: 1px dashed rgba(255,72,54,0.3); margin-top:2px;"><span class="stat-label" style="color: rgba(255,72,54,0.7);">${window.i18n ? window.i18n.t('card_point_value') : '09 // $/POINT'}</span><span class="stat-value val-point-value ${pnlClass}" style="font-size:12px;">${pointValueText || pointValue}</span></div>
             </div>
             <div class="wallet-footer">
                 <span class="timestamp">${footerTimestamp}</span>
@@ -688,13 +688,13 @@ class DashboardManager {
         };
 
         // ── $/POINT metric ─────────────────────────────────────────────────
-        let pointValue;
+        let pointValueText;
         if (data.points && data.points > 0) {
-            pointValue = data.pnl < 0
-                ? `$${(Math.abs(data.pnl) / data.points).toFixed(4)}`
+            pointValueText = data.pnl < 0
+                ? `-$${(Math.abs(data.pnl) / data.points).toFixed(4)}`
                 : `+$${(data.pnl / data.points).toFixed(4)}`;
         } else {
-            pointValue = 'N/A';
+            pointValueText = 'N/A';
         }
 
         // ── ROI ────────────────────────────────────────────────────────────
@@ -721,7 +721,7 @@ class DashboardManager {
         setText('.val-points',       (data.points || 0).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
         setText('.val-rank',         data.rank ? data.rank : 'N/A');
         setText('.val-win-rate',     window.Utils.formatPercent(data.winRate));
-        setText('.val-point-value',  pointValue);
+        setTextWithClass('.val-point-value', pointValueText, 'positive', 'negative', (data.pnl || 0) >= 0);
         setText('.timestamp',        footerTimestamp);
 
         // ── Patch PnL (text + positive/negative class) ─────────────────────

@@ -132,37 +132,59 @@ app.get('/dashboard', (req, res) => {
 app.use(express.static(path.join(__dirname, '../public')));
 
 
-// ─── Secure Key Store (HttpOnly Cookies) ───────────────────────────────────
-// This approach is secure against XSS and works perfectly on Vercel without Redis.
-app.post('/api/exchanges/keys/store', csrfProtect, validate(schemas.storeKeySchema, 'body'), (req, res) => {
-    const { type, entryId, value } = req.validatedBody;
-    const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
+// ─── Secure Key Store (HttpOnly Cookies & Redis Vault) ───────────────────────────────────
+app.post('/api/exchanges/keys/store', csrfProtect, validate(schemas.storeKeySchema, 'body'), async (req, res) => {
+    try {
+        const { type, entryId, value } = req.validatedBody;
+        const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
 
-    res.cookie(cookieName, value, {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: 'lax',
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-        path: '/'
-    });
+        // Save to Redis Vault for cross-device sync (1 year TTL)
+        const vaultKey = `vault:${type}:${entryId}`;
+        await store.set(vaultKey, value, 365 * 24 * 60 * 60);
 
-    logger.info(`Stored ${type} key for entry ${entryId} securely in cookie`);
-    res.json({ success: true });
+        res.cookie(cookieName, value, {
+            httpOnly: true,
+            secure: isProd,
+            sameSite: 'lax',
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+            path: '/'
+        });
+
+        logger.info(`Stored ${type} key for entry ${entryId} securely in Vault and Cookie`);
+        res.json({ success: true });
+    } catch (err) {
+        logger.error('Failed to store API key in vault:', err.message);
+        res.status(500).json({ error: 'Failed to securely store API key.' });
+    }
 });
 
-// ─── Check if a key exists in Cookies ──────────────────────────────────────
-app.get('/api/exchanges/keys/check', validate(schemas.keyCheckQuerySchema, 'query'), (req, res) => {
+// ─── Check if a key exists in Vault or Cookies ──────────────────────────────────────
+app.get('/api/exchanges/keys/check', validate(schemas.keyCheckQuerySchema, 'query'), async (req, res) => {
     const { type, entryId } = req.validatedQuery;
     const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
-    res.json({ exists: !!req.cookies[cookieName] });
+    const vaultKey = `vault:${type}:${entryId}`;
+    
+    // Check Vault first, then fallback to cookie
+    const vaultValue = await store.get(vaultKey);
+    const exists = !!vaultValue || !!req.cookies[cookieName];
+    
+    res.json({ exists });
 });
 
-app.post('/api/exchanges/keys/remove', csrfProtect, validate(schemas.keyRemoveBodySchema, 'body'), (req, res) => {
-    const { type, entryId } = req.validatedBody;
-    const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
-    res.clearCookie(cookieName);
-    logger.info(`Removed ${type} key for entry ${entryId} from cookies`);
-    res.json({ success: true });
+app.post('/api/exchanges/keys/remove', csrfProtect, validate(schemas.keyRemoveBodySchema, 'body'), async (req, res) => {
+    try {
+        const { type, entryId } = req.validatedBody;
+        const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
+        const vaultKey = `vault:${type}:${entryId}`;
+        
+        await store.set(vaultKey, null, 1); 
+        res.clearCookie(cookieName);
+        logger.info(`Removed ${type} key for entry ${entryId} from Vault and cookies`);
+        res.json({ success: true });
+    } catch (err) {
+        logger.error('Failed to remove API key from vault:', err.message);
+        res.status(500).json({ error: 'Failed to remove API key.' });
+    }
 });
 
 // ─── Server-side Persistent Manual Overrides (Cross-device sync) ───────────
@@ -225,7 +247,10 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
     try {
         const entryId = req.validatedBody.entryId;
         
-        const apiKey = req.cookies[`ext_key_${entryId}`];
+        let apiKey = await store.get(`vault:extended:${entryId}`);
+        if (!apiKey) {
+            apiKey = req.cookies[`ext_key_${entryId}`];
+        }
         if (!apiKey) return res.status(404).json({ error: 'API Key not found in vault. Please re-add this exchange.' });
 
         const headers = {
@@ -468,7 +493,10 @@ app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, valida
     try {
         const entryId = req.validatedBody.entryId;
 
-        const apiKey = req.cookies[`ext_key_${entryId}`];
+        let apiKey = await store.get(`vault:extended:${entryId}`);
+        if (!apiKey) {
+            apiKey = req.cookies[`ext_key_${entryId}`];
+        }
         if (!apiKey) return res.status(404).json({ error: 'API Key not found in vault' });
 
         const headers = {
@@ -796,7 +824,10 @@ app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(s
         const OMNI_PUB = process.env.VARIATIONAL_PUB_URL || 'https://omni-client-api.prod.ap-northeast-1.variational.io';
 
         // Forward the vr-token session cookie from the browser (or body) to Omni API
-        const vrToken = req.body.vrToken || req.cookies?.['vr-token'];
+        let vrToken = await store.get(`vault:variational:${entryId}`);
+        if (!vrToken) {
+            vrToken = req.body.vrToken || req.cookies?.[`vr_token_${entryId}`] || req.cookies?.['vr-token'];
+        }
         const authHeaders = vrToken
             ? { Cookie: `vr-token=${vrToken}`, 'Content-Type': 'application/json' }
             : { 'Content-Type': 'application/json' };

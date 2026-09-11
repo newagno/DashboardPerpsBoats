@@ -165,6 +165,35 @@ app.post('/api/exchanges/keys/remove', csrfProtect, validate(schemas.keyRemoveBo
     res.json({ success: true });
 });
 
+// ─── Server-side Persistent Manual Overrides (Cross-device sync) ───────────
+app.post('/api/exchanges/manual-override/save', csrfProtect, async (req, res) => {
+    try {
+        const { entryId, walletAddress, exchange, manualData } = req.body;
+        if (!entryId && !walletAddress) {
+            return res.status(400).json({ error: 'entryId or walletAddress is required' });
+        }
+        const key = walletAddress ? `override:${walletAddress.toLowerCase()}` : `override:${entryId}`;
+        await store.set(key, { ...manualData, exchange, updatedAt: Date.now() }, 365 * 24 * 60 * 60); // 1 year TTL
+        logger.info(`Saved persistent manual override for key ${key}`);
+        res.json({ success: true });
+    } catch (err) {
+        logger.error('Failed to save manual override:', err.message);
+        res.status(500).json({ error: 'Failed to save manual override' });
+    }
+});
+
+app.get('/api/exchanges/manual-override/get', async (req, res) => {
+    try {
+        const keyStr = req.query.key;
+        if (!keyStr) return res.status(400).json({ error: 'key is required' });
+        const key = `override:${keyStr.toLowerCase()}`;
+        const data = await store.get(key);
+        res.json({ success: true, data });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ─── Proxy - Extended Exchange (Starknet) ────────────────────────────────────
 app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(schemas.extendedEntryIdSchema, 'body'), async (req, res) => {
     const errors = [];
@@ -289,7 +318,22 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
 
         // Leaderboard Rank
         const lbData = leaderboardRes.data?.data || {};
-        const rank = lbData.rank || null;
+        let rank = lbData.rank || null;
+
+        // Check server-side stored manual override for cross-device sync
+        let finalPoints = pointsRes.data || {};
+        const storedOverride = await store.get(`override:${entryId}`);
+        if (storedOverride) {
+            if (storedOverride.points !== undefined && storedOverride.points !== null && storedOverride.points !== '') {
+                finalPoints = parseFloat(storedOverride.points);
+            }
+            if (storedOverride.rank !== undefined && storedOverride.rank !== null && storedOverride.rank !== '') {
+                rank = storedOverride.rank;
+            }
+            if (storedOverride.initDeposit !== undefined) initDeposit = parseFloat(storedOverride.initDeposit);
+            if (storedOverride.actDeposit !== undefined) actDeposit = parseFloat(storedOverride.actDeposit);
+            if (storedOverride.volume !== undefined) finalVolume = parseFloat(storedOverride.volume);
+        }
 
         // NATIVE PNL (from fresh pnl chart)
         let nativeTotalPnl = 0;
@@ -311,7 +355,7 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
             total_volume: finalVolume,
             pnl: pnl,
             win_rate: winRate,
-            points: pointsRes.data || {},
+            points: finalPoints,
             rank: rank,
             requires_history_sync: requiresSync,
             partial_success: errors.length > 0 ? true : undefined,
@@ -576,6 +620,18 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, validate(schemas.
             if (!totalPoints || totalPoints === 0) totalPoints = 458;
             if (!rank) rank = '4,761';
         }
+        
+        // Check server-side stored manual override for cross-device sync
+        const storedOverride = await store.get(`override:${targetAddress.toLowerCase()}`);
+        if (storedOverride) {
+            if (storedOverride.points !== undefined && storedOverride.points !== null && storedOverride.points !== '') {
+                totalPoints = parseFloat(storedOverride.points);
+            }
+            if (storedOverride.rank !== undefined && storedOverride.rank !== null && storedOverride.rank !== '') {
+                rank = storedOverride.rank;
+            }
+        }
+
         if (req.body.manualPoints !== undefined && req.body.manualPoints !== null && req.body.manualPoints !== '') {
             totalPoints = parseFloat(req.body.manualPoints);
         }
@@ -827,7 +883,21 @@ app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(s
                 logger.info('[Variational] Points:', JSON.stringify(responseData.points));
             }
         } else {
-            logger.warn('[Variational] No vr-token cookie - returning platform stats only');
+        // Check server-side stored manual override for cross-device sync
+        if (targetAddress) {
+            const storedOverride = await store.get(`override:${targetAddress.toLowerCase()}`);
+            if (storedOverride) {
+                responseData.portfolio = responseData.portfolio || {};
+                if (storedOverride.actDeposit !== undefined) responseData.portfolio.act_deposit = parseFloat(storedOverride.actDeposit);
+                if (storedOverride.initDeposit !== undefined) responseData.portfolio.init_deposit = parseFloat(storedOverride.initDeposit);
+                if (storedOverride.volume !== undefined) responseData.portfolio.volume = parseFloat(storedOverride.volume);
+                if (storedOverride.winRate !== undefined) responseData.portfolio.win_rate = parseFloat(storedOverride.winRate);
+                if (storedOverride.roi !== undefined) responseData.portfolio.roi = parseFloat(storedOverride.roi);
+                
+                responseData.points = responseData.points || {};
+                if (storedOverride.points !== undefined) responseData.points.total_points = parseFloat(storedOverride.points);
+                if (storedOverride.rank !== undefined) responseData.points.rank = storedOverride.rank;
+            }
         }
 
         res.json(responseData);

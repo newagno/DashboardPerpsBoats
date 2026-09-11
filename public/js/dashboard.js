@@ -768,10 +768,13 @@ class DashboardManager {
         this.openEditCard(id);
     }
 
-    saveVariationalEdit() {
+    async saveVariationalEdit() {
         const id = document.getElementById('edit-var-id').value;
         if (!id) return;
         const walletAddress = document.getElementById('edit-var-wallet-address').value.trim();
+        const entry = window.walletManager.state.activeExchanges.find(e => e.id === id);
+        const exchange = entry ? entry.exchange : 'variational';
+
         const manualData = {
             initDeposit: parseFloat(document.getElementById('edit-var-init-deposit').value) || 0,
             actDeposit: parseFloat(document.getElementById('edit-var-act-deposit').value) || 0,
@@ -781,7 +784,24 @@ class DashboardManager {
             winRate: parseFloat(document.getElementById('edit-var-win-rate').value) || 0,
             roi: parseFloat(document.getElementById('edit-var-roi').value) || 0
         };
+
+        // 1. Update local state
         window.walletManager.updateManualData(id, manualData, walletAddress);
+
+        // 2. Persist to server for cross-device sync
+        try {
+            await fetch('/api/exchanges/manual-override/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'TradeDash'
+                },
+                body: JSON.stringify({ entryId: id, walletAddress, exchange, manualData })
+            });
+        } catch (e) {
+            console.error('Failed to sync manual override to server:', e);
+        }
+
         document.getElementById('modal-edit-variational').style.display = 'none';
         window.refreshEngine.refresh();
     }

@@ -219,12 +219,14 @@ app.get('/api/exchanges/manual-override/get', async (req, res) => {
 // ─── Server-side Persistent Active Exchanges (Cross-device sync) ────────────
 app.post('/api/exchanges/state/save', csrfProtect, async (req, res) => {
     try {
-        const { activeExchanges } = req.body;
+        const { activeExchanges, lastUpdated } = req.body;
         if (!Array.isArray(activeExchanges)) {
             return res.status(400).json({ error: 'activeExchanges must be an array' });
         }
-        await store.set('global:active_exchanges', activeExchanges, 365 * 24 * 60 * 60);
-        logger.info(`Saved ${activeExchanges.length} active exchanges to server store`);
+        
+        const timestamp = lastUpdated || Date.now();
+        await store.set('global:active_exchanges_v3', { exchanges: activeExchanges, lastUpdated: timestamp }, 365 * 24 * 60 * 60);
+        logger.info(`Saved ${activeExchanges.length} active exchanges to server store (ts: ${timestamp})`);
         res.json({ success: true });
     } catch (err) {
         logger.error('Failed to save active exchanges:', err.message);
@@ -234,8 +236,19 @@ app.post('/api/exchanges/state/save', csrfProtect, async (req, res) => {
 
 app.get('/api/exchanges/state/get', async (req, res) => {
     try {
-        const exchanges = await store.get('global:active_exchanges') || [];
-        res.json({ success: true, exchanges });
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
+        res.set('Surrogate-Control', 'no-store');
+
+        const data = await store.get('global:active_exchanges_v3');
+        if (data && Array.isArray(data.exchanges)) {
+            res.json({ success: true, exchanges: data.exchanges, lastUpdated: data.lastUpdated });
+        } else {
+            // Fallback to older version if v3 doesn't exist yet
+            const oldExchanges = await store.get('global:active_exchanges') || [];
+            res.json({ success: true, exchanges: oldExchanges, lastUpdated: 0 });
+        }
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

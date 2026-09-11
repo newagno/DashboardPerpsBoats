@@ -92,6 +92,8 @@ class WalletManager {
     _saveExchanges() {
         try {
             localStorage.setItem('wallet_state_exchanges_v3', JSON.stringify(this.state.activeExchanges));
+            const ts = Date.now();
+            localStorage.setItem('wallet_state_last_updated', ts.toString());
             if (this._syncChannel) {
                 this._syncChannel.postMessage({
                     type: 'EXCHANGES_UPDATED',
@@ -103,19 +105,24 @@ class WalletManager {
         }
 
         // Persist activeExchanges to backend Redis for cross-device sync
+        const ts = localStorage.getItem('wallet_state_last_updated') || Date.now();
         fetch('/api/exchanges/state/save', {
             method: 'POST',
             headers: this._csrfHeaders,
-            body: JSON.stringify({ activeExchanges: this.state.activeExchanges })
+            body: JSON.stringify({ activeExchanges: this.state.activeExchanges, lastUpdated: parseInt(ts, 10) })
         }).catch(err => console.warn('Failed to sync activeExchanges to server:', err));
     }
 
     async syncWithServer() {
         try {
-            const r = await fetch('/api/exchanges/state/get');
+            // Bypass potential Edge caches with a timestamp param
+            const r = await fetch('/api/exchanges/state/get?_t=' + Date.now());
             if (!r.ok) return false;
             const data = await r.json();
             
+            const localTs = parseInt(localStorage.getItem('wallet_state_last_updated') || '0', 10);
+            const serverTs = data.lastUpdated || 0;
+
             // Server is empty, but Local has exchanges -> Push to server
             if (data.success && (!Array.isArray(data.exchanges) || data.exchanges.length === 0)) {
                 if (this.state.activeExchanges.length > 0) {
@@ -123,7 +130,7 @@ class WalletManager {
                     fetch('/api/exchanges/state/save', {
                         method: 'POST',
                         headers: this._csrfHeaders,
-                        body: JSON.stringify({ activeExchanges: this.state.activeExchanges })
+                        body: JSON.stringify({ activeExchanges: this.state.activeExchanges, lastUpdated: localTs || Date.now() })
                     }).catch(err => console.warn('Failed to push to server:', err));
                 }
                 return false;
@@ -132,12 +139,26 @@ class WalletManager {
             if (data.success && Array.isArray(data.exchanges) && data.exchanges.length > 0) {
                 const serverStr = JSON.stringify(data.exchanges);
                 const localStr = JSON.stringify(this.state.activeExchanges);
+                
                 if (serverStr !== localStr) {
-                    this.state.activeExchanges = data.exchanges;
-                    try {
-                        localStorage.setItem('wallet_state_exchanges_v3', serverStr);
-                    } catch (e) {}
-                    return true;
+                    // Overwrite local state ONLY if server state is newer, OR if local state is completely empty
+                    if (serverTs >= localTs || localTs === 0 || this.state.activeExchanges.length === 0) {
+                        console.log('Server state is newer or local is empty. Adopting server state.');
+                        this.state.activeExchanges = data.exchanges;
+                        try {
+                            localStorage.setItem('wallet_state_exchanges_v3', serverStr);
+                            if (serverTs) localStorage.setItem('wallet_state_last_updated', serverTs.toString());
+                        } catch (e) {}
+                        return true;
+                    } else if (localTs > serverTs) {
+                        console.log('Local state is newer than server. Pushing local state to server...');
+                        fetch('/api/exchanges/state/save', {
+                            method: 'POST',
+                            headers: this._csrfHeaders,
+                            body: JSON.stringify({ activeExchanges: this.state.activeExchanges, lastUpdated: localTs })
+                        }).catch(err => console.warn('Failed to push to server:', err));
+                        return false;
+                    }
                 }
             }
         } catch (e) {

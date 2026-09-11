@@ -213,7 +213,11 @@
             <div class="modal-body" style="padding: 20px 0;">
                 <input type="hidden" id="edit-var-id">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                    <div style="grid-column: span 2;">
+                    <div>
+                        <label data-i18n="label_label">Label</label>
+                        <input type="text" id="edit-var-label" placeholder="e.g. MM, Main..." style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
+                    </div>
+                    <div>
                         <label data-i18n="wallet_address">Wallet Address</label>
                         <input type="text" id="edit-var-wallet-address" placeholder="0x..." style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff;">
                     </div>

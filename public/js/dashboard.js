@@ -554,7 +554,8 @@ class DashboardManager {
             : `<div style="width:16px;height:16px;flex-shrink:0;"></div>`;
         // Sanitize label to prevent HTML injection
         const safeLabel = this.escapeHtml(label);
-        const labelHtml = safeLabel ? `<span class="card-label">${safeLabel}</span>` : '';
+        const isDefaultOrEmpty = !safeLabel || safeLabel.toLowerCase() === exchange.toLowerCase();
+        const labelHtml = !isDefaultOrEmpty ? `<span class="card-label">${safeLabel}</span>` : '';
         const addrRow = addrShort ? `<span class="wallet-address-truncated">ID: ${addrShort}</span>` : '';
 
         const headerHtml = (editBtnArg = '') => `
@@ -748,6 +749,8 @@ class DashboardManager {
         const md = entry.manualData || {};
 
         document.getElementById('edit-var-id').value = id;
+        const labelEl = document.getElementById('edit-var-label');
+        if (labelEl) labelEl.value = entry.label || '';
         document.getElementById('edit-var-wallet-address').value = entry.walletAddress || '';
         document.getElementById('edit-var-init-deposit').value = md.initDeposit !== undefined ? md.initDeposit : (cardData.initDeposit || '');
         document.getElementById('edit-var-act-deposit').value = md.actDeposit !== undefined ? md.actDeposit : (cardData.actDeposit || '');
@@ -771,6 +774,7 @@ class DashboardManager {
     async saveVariationalEdit() {
         const id = document.getElementById('edit-var-id').value;
         if (!id) return;
+        const label = document.getElementById('edit-var-label')?.value.trim() || '';
         const walletAddress = document.getElementById('edit-var-wallet-address').value.trim();
         const entry = window.walletManager.state.activeExchanges.find(e => e.id === id);
         const exchange = entry ? entry.exchange : 'variational';
@@ -786,7 +790,7 @@ class DashboardManager {
         };
 
         // 1. Update local state
-        window.walletManager.updateManualData(id, manualData, walletAddress);
+        window.walletManager.updateManualData(id, manualData, walletAddress, label);
 
         // 2. Persist to server for cross-device sync
         try {
@@ -796,13 +800,15 @@ class DashboardManager {
                     'Content-Type': 'application/json',
                     'X-Requested-With': 'TradeDash'
                 },
-                body: JSON.stringify({ entryId: id, walletAddress, exchange, manualData })
+                body: JSON.stringify({ entryId: id, walletAddress, exchange, manualData, label })
             });
         } catch (e) {
             console.error('Failed to sync manual override to server:', e);
         }
 
         document.getElementById('modal-edit-variational').style.display = 'none';
+        const remaining = window.walletManager.state.activeExchanges.map(e => ({ ...e, success: false, error: 'Refreshing...' }));
+        this.updateAllWalletCards(remaining);
         window.refreshEngine.refresh();
     }
 

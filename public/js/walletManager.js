@@ -157,7 +157,7 @@ class WalletManager {
             id: _generateId(),
             exchange,
             walletAddress: addr,
-            label: label || (exchange.charAt(0).toUpperCase() + exchange.slice(1)),
+            label: label || null,
             updatedAt: new Date().toISOString()
         };
         this.state.activeExchanges.push(entry);
@@ -176,7 +176,7 @@ class WalletManager {
             id: _generateId(),
             exchange: 'variational',
             walletAddress: walletAddress || null,
-            label: label || 'Variational',
+            label: label || null,
             manualData: { ...manualData, inputDate: Date.now() },
             updatedAt: new Date().toISOString()
         };
@@ -190,19 +190,21 @@ class WalletManager {
      * @param {string} id - entry id
      * @param {object} manualData - updated stats
      * @param {string|null} walletAddress - optional updated wallet address
+     * @param {string|null} label - optional updated label
      */
-    updateManualData(id, manualData, walletAddress = null) {
+    updateManualData(id, manualData, walletAddress = null, label = null) {
         const entry = this.state.activeExchanges.find(e => e.id === id);
         if (!entry) return false;
         entry.manualData = { ...(entry.manualData || {}), ...manualData, inputDate: Date.now() };
         if (walletAddress !== null) entry.walletAddress = walletAddress;
+        if (label !== null) entry.label = label || null;
         entry.updatedAt = new Date().toISOString();
         this._saveExchanges();
         return true;
     }
 
-    updateVariationalManual(id, manualData, walletAddress = null) {
-        return this.updateManualData(id, manualData, walletAddress);
+    updateVariationalManual(id, manualData, walletAddress = null, label = null) {
+        return this.updateManualData(id, manualData, walletAddress, label);
     }
 
     /**

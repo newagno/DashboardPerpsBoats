@@ -628,11 +628,14 @@ input:focus {
     }
     
     .wallets-grid {
-        gap: 15px;
+        gap: 20px;
+        flex-direction: column;
+        overflow-x: hidden;
     }
     
     .wallet-card {
-        min-width: 260px;
+        min-width: 100%;
+        width: 100%;
     }
 }
 

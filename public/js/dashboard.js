@@ -576,9 +576,21 @@ class DashboardManager {
             </div>`;
 
         if (!success) {
+            // For Extended cards: if error is about missing API key, show re-enter field
+            const isApiKeyError = exchange === 'extended' && error && error.toLowerCase().includes('api key');
+            const apiKeyReenterHtml = isApiKeyError ? `
+                <div style="margin-top:12px; padding:12px; background:rgba(255,165,0,0.08); border:1px solid rgba(255,165,0,0.3); border-radius:4px;">
+                    <p style="margin:0 0 8px; font-size:0.78em; color:#ffa500;">⚠ API ключ відсутній на цьому пристрої. Введіть його нижче:</p>
+                    <input type="text" id="reenter-api-key-${id}" placeholder="Вставте API ключ..." autocomplete="new-password"
+                        style="width:100%;padding:8px;background:rgba(0,0,0,0.5);border:1px solid rgba(255,165,0,0.4);color:#fff;box-sizing:border-box;font-size:0.85em;">
+                    <button onclick="window.dashboardMgr.saveReenteredApiKey('${id}')" style="margin-top:8px;width:100%;padding:6px;background:rgba(255,165,0,0.2);border:1px solid rgba(255,165,0,0.5);color:#ffa500;cursor:pointer;font-size:0.82em;">
+                        🔑 Зберегти ключ і оновити
+                    </button>
+                </div>` : '';
             card.innerHTML = headerHtml() + `
                 <div class="card-body error-text" style="padding:20px; color:#ff6b6b;">
                     SYNC ERROR: ${this.escapeHtml(error || (window.i18n ? window.i18n.t('failed_sync') : 'Connection Failed'))}
+                    ${apiKeyReenterHtml}
                 </div>`;
             return card;
         }
@@ -747,6 +759,30 @@ class DashboardManager {
         const remaining = window.walletManager.state.activeExchanges.map(e => ({ ...e, success: false, error: window.i18n ? window.i18n.t('refreshing') : 'Refreshing...' }));
         this.updateAllWalletCards(remaining);
         window.refreshEngine.refresh();
+    }
+
+    async saveReenteredApiKey(id) {
+        const input = document.getElementById(`reenter-api-key-${id}`);
+        if (!input) return;
+        const key = input.value.trim();
+        if (!key) {
+            alert('⚠ Ключ не може бути порожнім');
+            return;
+        }
+        try {
+            const result = await window.walletManager.setExtendedApiKey(id, key);
+            if (result && result.success === false) {
+                alert('❌ Не вдалося зберегти ключ: ' + (result.error || 'Помилка'));
+                return;
+            }
+            console.log('[Extended] API key re-entered and saved for entry', id);
+            input.value = '';
+            // Refresh to retry loading stats with the new key
+            window.refreshEngine.refresh();
+        } catch (err) {
+            console.error('[Extended] saveReenteredApiKey failed:', err);
+            alert('❌ Помилка: ' + err.message);
+        }
     }
 
     // ── Variational Edit Modal ─────────────────────────────────────────────

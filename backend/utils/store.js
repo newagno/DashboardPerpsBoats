@@ -67,7 +67,10 @@ async function get(key) {
     if (redisClient) {
         try {
             const val = await redisClient.get(key);
-            return val ? JSON.parse(val) : null;
+            if (!val) return null;
+            const parsed = JSON.parse(val);
+            // Guard against serialized null (from old store.set(key, null))
+            return parsed === null ? null : parsed;
         } catch (err) {
             logger.error(`Redis GET error for key ${key}:`, err.message);
         }
@@ -87,8 +90,12 @@ async function get(key) {
 
 /**
  * Set a value with optional TTL (in seconds).
+ * If value is null or undefined, the key is deleted instead.
  */
 async function set(key, value, ttlSeconds = null) {
+    if (value === null || value === undefined) {
+        return del(key);
+    }
     const serialized = JSON.stringify(value);
     
     if (redisClient) {

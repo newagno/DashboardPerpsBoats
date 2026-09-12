@@ -14,9 +14,9 @@ const memoryCache = new Map();
 
 // ── Redis initialization ──────────────────────────────────────────────────────
 async function initRedis() {
-    const connectionUrl = process.env.REDIS_URL || process.env.KV_URL;
+    const connectionUrl = process.env.REDIS_URL || process.env.KV_URL || process.env.MY_REDIS_REDIS_URL;
     if (!connectionUrl) {
-        logger.warn('REDIS_URL / KV_URL is not defined. Using In-Memory cache fallback.');
+        logger.warn('REDIS_URL / KV_URL / MY_REDIS_REDIS_URL is not defined. Using In-Memory cache fallback.');
         return false;
     }
 

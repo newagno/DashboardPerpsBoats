@@ -112,9 +112,17 @@ class RefreshEngine {
                     } else if (exchange === 'variational') {
                         // Manual data short-circuit — no API call, read from stored entry
                         if (!entry.manualData) {
-                            console.warn(`Variational entry ${id} has no manualData. Removing.`);
-                            window.walletManager.removeExchange(id);
-                            return null;
+                            // Step 3 fix: show empty warning card instead of silently deleting
+                            console.warn(`[Variational] Entry ${id} has no manualData — showing empty warning card instead of removing.`);
+                            return {
+                                id, exchange, walletAddress: effectiveAddress, label,
+                                data: {
+                                    init_deposit: 0, act_deposit: 0, total_volume: 0,
+                                    points: 0, rank: null, win_rate: 0, roi: null,
+                                    _warning: 'Немає даних. Натисніть «Редагувати» щоб ввести дані вручну.'
+                                },
+                                success: true
+                            };
                         }
                         const md = entry.manualData;
                         data = {

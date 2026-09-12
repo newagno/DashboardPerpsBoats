@@ -131,6 +131,33 @@ app.get('/dashboard', (req, res) => {
 });
 app.use(express.static(path.join(__dirname, '../public')));
 
+// ── Health / Diagnostics ─────────────────────────────────────────────────────
+app.get('/api/health', async (req, res) => {
+    const redisStatus = store.getStatus();
+    let redisPing = null;
+    if (redisStatus.connected) {
+        try {
+            const client = store.getClient();
+            redisPing = await client.ping();
+        } catch (e) {
+            redisPing = `error: ${e.message}`;
+        }
+    }
+    res.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime_seconds: Math.floor(process.uptime()),
+        redis: {
+            connected: redisStatus.connected,
+            mode: redisStatus.mode,
+            url: redisStatus.url,        // masked (password hidden)
+            ping: redisPing,
+            error: redisStatus.error
+        },
+        env: process.env.NODE_ENV || 'development'
+    });
+});
+
 
 // ─── Secure Key Store (HttpOnly Cookies & Redis Vault) ───────────────────────────────────
 app.post('/api/exchanges/keys/store', csrfProtect, validate(schemas.storeKeySchema, 'body'), async (req, res) => {

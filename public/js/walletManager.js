@@ -117,52 +117,67 @@ class WalletManager {
         try {
             // Bypass potential Edge caches with a timestamp param
             const r = await fetch('/api/exchanges/state/get?_t=' + Date.now());
-            if (!r.ok) return false;
+            if (!r.ok) {
+                console.warn('[Sync] Server returned HTTP', r.status, '— skipping sync.');
+                return false;
+            }
             const data = await r.json();
-            
+
             const localTs = parseInt(localStorage.getItem('wallet_state_last_updated') || '0', 10);
             const serverTs = data.lastUpdated || 0;
+            const serverExchanges = Array.isArray(data.exchanges) ? data.exchanges : [];
 
-            // Server is empty, but Local has exchanges -> Push to server
-            if (data.success && (!Array.isArray(data.exchanges) || data.exchanges.length === 0)) {
+            console.log(`[Sync] localTs=${localTs}, serverTs=${serverTs}, local=${this.state.activeExchanges.length} entries, server=${serverExchanges.length} entries`);
+
+            // SAFETY: never wipe local state if server returns empty and local has data
+            if (data.success && serverExchanges.length === 0) {
                 if (this.state.activeExchanges.length > 0) {
-                    console.log('Server store is empty. Pushing local exchanges to server...');
+                    console.log('[Sync] Server empty, local has data → pushing local to server');
                     fetch('/api/exchanges/state/save', {
                         method: 'POST',
                         headers: this._csrfHeaders,
                         body: JSON.stringify({ activeExchanges: this.state.activeExchanges, lastUpdated: localTs || Date.now() })
-                    }).catch(err => console.warn('Failed to push to server:', err));
+                    }).catch(err => console.warn('[Sync] Failed to push to server:', err));
+                } else {
+                    console.log('[Sync] Both server and local are empty — nothing to do.');
                 }
                 return false;
             }
 
-            if (data.success && Array.isArray(data.exchanges) && data.exchanges.length > 0) {
-                const serverStr = JSON.stringify(data.exchanges);
+            if (data.success && serverExchanges.length > 0) {
+                const serverStr = JSON.stringify(serverExchanges);
                 const localStr = JSON.stringify(this.state.activeExchanges);
-                
-                if (serverStr !== localStr) {
-                    // Overwrite local state ONLY if server state is newer, OR if local state is completely empty
-                    if (serverTs >= localTs || localTs === 0 || this.state.activeExchanges.length === 0) {
-                        console.log('Server state is newer or local is empty. Adopting server state.');
-                        this.state.activeExchanges = data.exchanges;
-                        try {
-                            localStorage.setItem('wallet_state_exchanges_v3', serverStr);
-                            if (serverTs) localStorage.setItem('wallet_state_last_updated', serverTs.toString());
-                        } catch (e) {}
-                        return true;
-                    } else if (localTs > serverTs) {
-                        console.log('Local state is newer than server. Pushing local state to server...');
-                        fetch('/api/exchanges/state/save', {
-                            method: 'POST',
-                            headers: this._csrfHeaders,
-                            body: JSON.stringify({ activeExchanges: this.state.activeExchanges, lastUpdated: localTs })
-                        }).catch(err => console.warn('Failed to push to server:', err));
-                        return false;
-                    }
+
+                if (serverStr === localStr) {
+                    console.log('[Sync] Server and local state match — no update needed.');
+                    return false;
+                }
+
+                // Server is newer OR local is empty → adopt server state
+                if (serverTs >= localTs || localTs === 0 || this.state.activeExchanges.length === 0) {
+                    console.log('[Sync] Adopting server state (server is newer or local is empty).');
+                    this.state.activeExchanges = serverExchanges;
+                    try {
+                        localStorage.setItem('wallet_state_exchanges_v3', serverStr);
+                        if (serverTs) localStorage.setItem('wallet_state_last_updated', serverTs.toString());
+                    } catch (e) { console.warn('[Sync] localStorage write failed:', e); }
+                    window.dispatchEvent(new CustomEvent('exchanges-synced', { detail: serverExchanges }));
+                    return true;
+                }
+
+                // Local is newer → push to server
+                if (localTs > serverTs) {
+                    console.log('[Sync] Local state is newer → pushing to server.');
+                    fetch('/api/exchanges/state/save', {
+                        method: 'POST',
+                        headers: this._csrfHeaders,
+                        body: JSON.stringify({ activeExchanges: this.state.activeExchanges, lastUpdated: localTs })
+                    }).catch(err => console.warn('[Sync] Failed to push to server:', err));
+                    return false;
                 }
             }
         } catch (e) {
-            console.warn('Failed to sync activeExchanges from server:', e);
+            console.warn('[Sync] Exception during sync:', e);
         }
         return false;
     }

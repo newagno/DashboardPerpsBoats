@@ -13,19 +13,27 @@ let redisClient = null;
 const memoryCache = new Map();
 
 // ── Redis initialization ──────────────────────────────────────────────────────
+let _redisConnectedUrl = null;
+let _redisError = null;
+
 async function initRedis() {
     const connectionUrl = process.env.REDIS_URL || process.env.KV_URL || process.env.MY_REDIS_REDIS_URL;
     if (!connectionUrl) {
-        logger.warn('REDIS_URL / KV_URL / MY_REDIS_REDIS_URL is not defined. Using In-Memory cache fallback.');
+        _redisError = 'No REDIS_URL / KV_URL / MY_REDIS_REDIS_URL env variable found';
+        logger.warn(`[Redis] ${_redisError}. Using In-Memory cache fallback.`);
         return false;
     }
+
+    // Mask password in logs
+    const maskedUrl = connectionUrl.replace(/:([^@]+)@/, ':***@');
+    logger.info(`[Redis] Attempting to connect: ${maskedUrl}`);
 
     try {
         const Redis = require('ioredis');
         redisClient = new Redis(connectionUrl, {
             maxRetriesPerRequest: 2,
             retryStrategy(times) {
-                if (times > 3) return null; // stop retrying quickly
+                if (times > 3) return null; // stop retrying after 3 tries
                 return Math.min(times * 100, 1000);
             },
             enableReadyCheck: true,
@@ -34,15 +42,18 @@ async function initRedis() {
         });
 
         await redisClient.connect();
-        await redisClient.ping();
-        logger.info('✅ Redis connected successfully');
+        const pong = await redisClient.ping();
+        _redisConnectedUrl = maskedUrl;
+        _redisError = null;
+        logger.info(`[Redis] ✅ Connected successfully. PING response: ${pong}`);
         return true;
     } catch (err) {
+        _redisError = err.message;
         if (redisClient) {
-            try { await redisClient.quit(); } catch(_) {}
+            try { await redisClient.quit(); } catch (_) {}
         }
         redisClient = null;
-        logger.warn(`Redis connection failed: ${err.message}. Using In-Memory cache fallback.`);
+        logger.warn(`[Redis] ❌ Connection failed: ${err.message}. Falling back to In-Memory cache.`);
         return false;
     }
 }
@@ -142,5 +153,11 @@ module.exports = {
     set,
     del,
     exists,
-    getClient: () => redisClient
+    getClient: () => redisClient,
+    getStatus: () => ({
+        connected: redisClient !== null,
+        url: _redisConnectedUrl,
+        error: _redisError,
+        mode: redisClient ? 'redis' : 'memory'
+    })
 };

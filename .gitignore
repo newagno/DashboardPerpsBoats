@@ -12,3 +12,12 @@ backups/
 .antigravity
 .DS_Store (для macOS)
 .vercel
+
+.docs
+dist/
+.audit_tmp/
+fix_*.js
+ts_*.js
+original_server.js
+script.js
+inject_helpers.js

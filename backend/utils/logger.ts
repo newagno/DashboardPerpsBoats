@@ -2,7 +2,7 @@
  * Structured logger with sensitive data masking.
  * Uses winston for production-grade log management.
  */
-const winston = require('winston');
+import winston from 'winston';
 
 // ── Sensitive data masking ────────────────────────────────────────────────────
 const MASK_PATTERNS = [
@@ -20,9 +20,9 @@ const MASK_PATTERNS = [
 ];
 
 const maskSensitive = winston.format((info) => {
-    if (typeof info.message === 'string') {
+    if (typeof (info.message as any) === 'string') {
         for (const pattern of MASK_PATTERNS) {
-            info.message = info.message.replace(pattern.regex, pattern.replacement);
+            (info.message as any) = (info.message as any).replace(pattern.regex, pattern.replacement);
         }
     }
     return info;
@@ -57,7 +57,7 @@ const logger = winston.createLogger({
 /**
  * Mask an API key for safe display: ext_...a1b2
  */
-logger.maskApiKey = (key) => {
+(logger as any).maskApiKey = (key: any) => {
     if (!key || key.length < 8) return '***';
     return key.substring(0, 4) + '...' + key.substring(key.length - 4);
 };
@@ -65,9 +65,9 @@ logger.maskApiKey = (key) => {
 /**
  * Mask a wallet address for logs: 0x1234...abcd
  */
-logger.maskAddress = (addr) => {
+(logger as any).maskAddress = (addr: any) => {
     if (!addr || addr.length < 10) return '***';
     return addr.substring(0, 6) + '...' + addr.substring(addr.length - 4);
 };
 
-module.exports = logger;
+export default logger;

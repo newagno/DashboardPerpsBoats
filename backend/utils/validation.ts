@@ -1,9 +1,11 @@
+import { z, ZodSchema } from 'zod';
+import { Response, NextFunction } from 'express';
+import { CustomRequest } from '../types/api.types';
+
 /**
  * Input validation schemas using Zod.
  * All API inputs are validated before processing.
  */
-const { z } = require('zod');
-
 // ── Common validators ─────────────────────────────────────────────────────────
 const ethereumAddress = z.string()
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address format')
@@ -76,11 +78,12 @@ const extendedEntryIdSchema = z.object({
 
 /**
  * Creates an Express middleware that validates req.body against the given schema.
- * @param {z.ZodSchema} schema - Zod schema to validate against
+ * @param {ZodSchema} schema - Zod schema to validate against
  * @param {'body' | 'query'} source - Where to read input from
  */
-const validate = (schema, source = 'body') => (req, res, next) => {
-    const result = schema.safeParse(req[source]);
+const validate = (schema: ZodSchema, source: 'body' | 'query' = 'body') => (req: CustomRequest, res: Response, next: NextFunction) => {
+    const dataToValidate = source === 'body' ? req.body : req.query;
+    const result = schema.safeParse(dataToValidate);
     if (!result.success) {
         const errors = result.error.issues.map(i => `${i.path.join('.')}: ${i.message}`);
         return res.status(400).json({
@@ -89,11 +92,15 @@ const validate = (schema, source = 'body') => (req, res, next) => {
         });
     }
     // Replace raw input with validated & transformed data
-    req[source === 'body' ? 'validatedBody' : 'validatedQuery'] = result.data;
+    if (source === 'body') {
+        req.validatedBody = result.data;
+    } else {
+        req.validatedQuery = result.data;
+    }
     next();
 };
 
-module.exports = {
+export default {
     schemas: {
         extendedEntryIdSchema,
         nadoStatsSchema,

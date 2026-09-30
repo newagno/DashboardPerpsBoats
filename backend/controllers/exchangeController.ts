@@ -1,41 +1,14 @@
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const axios = require('axios');
-require('dotenv').config();
-const cookieParser = require('cookie-parser');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
-const logger = require('./utils/logger');
-const store = require('./utils/store');
-const { validate, schemas } = require('./utils/validation');
+import { Request, Response, NextFunction } from 'express';
+import { CustomRequest, ExtendedBalanceResponse, ExtendedOperationsResponse, NadoSubaccount, NadoSnapshot, NadoEvent, NadoOrder } from '../types/api.types';
+import http from 'axios';
+import store from '../utils/store';
+import logger from '../utils/logger';
+import crypto from 'crypto';
 
-const app = express();
-const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === 'production';
-
-// ── Initialize Cache ────────────────────────────────────────────────────────
-(async () => {
-    try {
-        await store.initRedis();
-    } catch (err) {
-        logger.warn('Redis initialization failed/skipped. Falling back to In-Memory cache.');
-    }
-})();
-
-// Axios instance with global timeout (reduced for Vercel)
-const http = axios.create({ 
-    timeout: isProd ? 9000 : 60000,
-    headers: { 'Accept-Encoding': 'gzip, deflate, br' }
-});
-
-// In-memory cache for Extended Exchange accountId per API key
 const extAccountIdCache = new Map();
 
-/**
- * Dynamically fetches and caches the account ID for the Extended Exchange.
- */
-async function getExtendedAccountId(BASE, headers, apiKey) {
+async function getExtendedAccountId(BASE: string, headers: any, apiKey: string) {
     if (extAccountIdCache.has(apiKey)) {
         return extAccountIdCache.get(apiKey);
     }
@@ -49,97 +22,86 @@ async function getExtendedAccountId(BASE, headers, apiKey) {
             return accountId;
         }
         throw new Error('No active account ID found in profile');
-    } catch (err) {
+    } catch (err: any) {
         const errMsg = err.response?.data ? JSON.stringify(err.response.data) : err.message;
         logger.error(`[Extended API] Failed to fetch accountId: ${errMsg}`);
         throw new Error(`Failed to fetch accountId: ${errMsg}`);
     }
 }
 
-// ── Security Headers ────────────────────────────────────────────────────────
-app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://unpkg.com"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-            fontSrc: ["'self'", "https://fonts.gstatic.com"],
-            imgSrc: ["'self'", "data:", "blob:"],
-            connectSrc: ["'self'"]
+const fetchAllExtendedPaginated = async (BASE: string, endpoint: string, cachedList: any[] = [], getUniqueId: (a: any) => string, isTerminalFn: (a: any) => boolean, headers: any) => {
+    let all = [];
+    const seen = new Set();
+    const terminalCacheIds = new Set(
+        cachedList
+            .filter(item => !isTerminalFn || isTerminalFn(item))
+            .map(item => getUniqueId(item))
+    );
+    let cursor = null;
+    let hitTerminalCache = false;
+    const fetchStartTime = Date.now();
+
+    for (let i = 0; i < 100; i++) {
+        // Strict safety time limit for Vercel functions (8.5 seconds)
+        if (Date.now() - fetchStartTime > 8500) {
+            logger.warn(`Extended sync time limit reached for ${endpoint}`);
+            break;
         }
-    },
-    crossOriginEmbedderPolicy: false
-}));
+        try {
+            let url = `${BASE}${endpoint}${endpoint.includes('?') ? '&' : '?'}limit=100`;
+            if (cursor) url += `&cursor=${cursor}`;
+            const r = await http.get(url, { headers });
+            const records = r.data?.data || [];
+            let added = 0;
 
-// ── CORS (environment-aware) ────────────────────────────────────────────────
-app.use(cors({
-    origin: (origin, callback) => {
-        // In production (Vercel): only allow exact known domains
-        const prodOrigins = [
-            'https://dashboard-perps.vercel.app'
-        ];
-        // In development: also allow localhost
-        const devOrigins = [
-            'http://localhost:3000', 'http://127.0.0.1:3000',
-            'http://localhost:5000', 'http://127.0.0.1:5000'
-        ];
-        const allowedOrigins = isProd ? prodOrigins : [...prodOrigins, ...devOrigins];
+            for (const rec of (Array.isArray(records) ? records : [])) {
+                const id = getUniqueId(rec);
+                if (terminalCacheIds.has(id)) {
+                    hitTerminalCache = true;
+                }
+                if (!seen.has(id)) {
+                    seen.add(id);
+                    all.push(rec);
+                    added++;
+                }
+            }
 
-        // Allow server-to-server requests (no Origin header)
-        if (!origin) return callback(null, true);
+            if (hitTerminalCache) {
+                break; // Met a terminal record in cache - incremental sync complete!
+            }
 
-        if (allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            logger.warn(`CORS blocked origin: ${origin}`);
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    credentials: true
-}));
-
-app.use(express.json());
-app.use(cookieParser());
-
-// ── Rate Limiting ───────────────────────────────────────────────────────────
-// MemoryStore is the default for express-rate-limit.
-// On Vercel, rate limiting is mostly handled by Edge network anyway.
-const apiLimiter = rateLimit({
-    windowMs: 1 * 60 * 1000,  // 1 minute
-    max: 60,                   // 60 requests per minute
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many requests. Slow down.' }
-});
-
-// ── CSRF Protection (custom header check for API routes) ────────────────────
-const csrfProtect = (req, res, next) => {
-    // Only enforce on state-changing methods
-    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
-        const xRequestedWith = req.headers['x-requested-with'];
-        if (xRequestedWith !== 'TradeDash') {
-            return res.status(403).json({ error: 'CSRF validation failed' });
+            const next = r.data?.pagination?.cursor;
+            if (added === 0 || !next) break;
+            cursor = next;
+        } catch (e: any) {
+            logger.error(`Extended pagination error [${endpoint}]:`, e.message);
+            break;
         }
     }
-    next();
+
+    // Merge and deduplicate
+    const mergedMap = new Map();
+    for (const item of cachedList) {
+        mergedMap.set(getUniqueId(item), item);
+    }
+    for (const item of all) {
+        mergedMap.set(getUniqueId(item), item);
+    }
+    return Array.from(mergedMap.values());
 };
 
-// ── Static routes ───────────────────────────────────────────────────────────
-app.get('/', (req, res) => { res.redirect('/dashboard'); });
-app.get('/dashboard', (req, res) => {
-    res.sendFile(path.join(__dirname, '../public/dashboard.html'));
-});
-app.use(express.static(path.join(__dirname, '../public')));
 
-// ── Health / Diagnostics ─────────────────────────────────────────────────────
-app.get('/api/health', async (req, res) => {
+
+
+
+export const getHealth_1 = async (req: CustomRequest, res: Response) => {
     const redisStatus = store.getStatus();
     let redisPing = null;
     if (redisStatus.connected) {
         try {
             const client = store.getClient();
-            redisPing = await client.ping();
-        } catch (e) {
+            redisPing = await client!.ping();
+        } catch (e: any) {
             redisPing = `error: ${e.message}`;
         }
     }
@@ -156,11 +118,9 @@ app.get('/api/health', async (req, res) => {
         },
         env: process.env.NODE_ENV || 'development'
     });
-});
+};
 
-
-// ─── Secure Key Store (HttpOnly Cookies & Redis Vault) ───────────────────────────────────
-app.post('/api/exchanges/keys/store', csrfProtect, validate(schemas.storeKeySchema, 'body'), async (req, res) => {
+export const keys_store_2 = async (req: CustomRequest, res: Response) => {
     try {
         const { type, entryId, value } = req.validatedBody;
         const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
@@ -179,14 +139,13 @@ app.post('/api/exchanges/keys/store', csrfProtect, validate(schemas.storeKeySche
 
         logger.info(`Stored ${type} key for entry ${entryId} securely in Vault and Cookie`);
         res.json({ success: true });
-    } catch (err) {
+    } catch (err: any) {
         logger.error('Failed to store API key in vault:', err.message);
         res.status(500).json({ error: 'Failed to securely store API key.' });
     }
-});
+};
 
-// ─── Check if a key exists in Vault or Cookies ──────────────────────────────────────
-app.get('/api/exchanges/keys/check', validate(schemas.keyCheckQuerySchema, 'query'), async (req, res) => {
+export const keys_check_3 = async (req: CustomRequest, res: Response) => {
     const { type, entryId } = req.validatedQuery;
     const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
     const vaultKey = `vault:${type}:${entryId}`;
@@ -196,9 +155,9 @@ app.get('/api/exchanges/keys/check', validate(schemas.keyCheckQuerySchema, 'quer
     const exists = !!vaultValue || !!req.cookies[cookieName];
     
     res.json({ exists });
-});
+};
 
-app.post('/api/exchanges/keys/remove', csrfProtect, validate(schemas.keyRemoveBodySchema, 'body'), async (req, res) => {
+export const keys_remove_4 = async (req: CustomRequest, res: Response) => {
     try {
         const { type, entryId } = req.validatedBody;
         const cookieName = type === 'extended' ? `ext_key_${entryId}` : `vr_token_${entryId}`;
@@ -208,43 +167,41 @@ app.post('/api/exchanges/keys/remove', csrfProtect, validate(schemas.keyRemoveBo
         res.clearCookie(cookieName);
         logger.info(`Removed ${type} key for entry ${entryId} from Vault and cookies`);
         res.json({ success: true });
-    } catch (err) {
+    } catch (err: any) {
         logger.error('Failed to remove API key from vault:', err.message);
         res.status(500).json({ error: 'Failed to remove API key.' });
     }
-});
+};
 
-// ─── Server-side Persistent Manual Overrides (Cross-device sync) ───────────
-app.post('/api/exchanges/manual-override/save', csrfProtect, async (req, res) => {
+export const manual_override_save_5 = async (req: CustomRequest, res: Response) => {
     try {
         const { entryId, walletAddress, exchange, manualData } = req.body;
         if (!entryId && !walletAddress) {
             return res.status(400).json({ error: 'entryId or walletAddress is required' });
         }
-        const key = walletAddress ? `override:${walletAddress.toLowerCase()}` : `override:${entryId}`;
+        const key = walletAddress ? `override:${(walletAddress as string).toLowerCase()}` : `override:${entryId}`;
         await store.set(key, { ...manualData, exchange, updatedAt: Date.now() }, 365 * 24 * 60 * 60); // 1 year TTL
         logger.info(`Saved persistent manual override for key ${key}`);
         res.json({ success: true });
-    } catch (err) {
+    } catch (err: any) {
         logger.error('Failed to save manual override:', err.message);
         res.status(500).json({ error: 'Failed to save manual override' });
     }
-});
+};
 
-app.get('/api/exchanges/manual-override/get', async (req, res) => {
+export const manual_override_get_6 = async (req: CustomRequest, res: Response) => {
     try {
-        const keyStr = req.query.key;
+        const keyStr = req.query.key as string;
         if (!keyStr) return res.status(400).json({ error: 'key is required' });
         const key = `override:${keyStr.toLowerCase()}`;
         const data = await store.get(key);
         res.json({ success: true, data });
-    } catch (err) {
+    } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
-});
+};
 
-// ─── Server-side Persistent Active Exchanges (Cross-device sync) ────────────
-app.post('/api/exchanges/state/save', csrfProtect, async (req, res) => {
+export const state_save_7 = async (req: CustomRequest, res: Response) => {
     try {
         const { activeExchanges, lastUpdated } = req.body;
         if (!Array.isArray(activeExchanges)) {
@@ -255,13 +212,13 @@ app.post('/api/exchanges/state/save', csrfProtect, async (req, res) => {
         await store.set('global:active_exchanges_v3', { exchanges: activeExchanges, lastUpdated: timestamp }, 365 * 24 * 60 * 60);
         logger.info(`Saved ${activeExchanges.length} active exchanges to server store (ts: ${timestamp})`);
         res.json({ success: true });
-    } catch (err) {
+    } catch (err: any) {
         logger.error('Failed to save active exchanges:', err.message);
         res.status(500).json({ error: 'Failed to save active exchanges' });
     }
-});
+};
 
-app.get('/api/exchanges/state/get', async (req, res) => {
+export const state_get_8 = async (req: CustomRequest, res: Response) => {
     try {
         res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
         res.set('Pragma', 'no-cache');
@@ -276,14 +233,13 @@ app.get('/api/exchanges/state/get', async (req, res) => {
             const oldExchanges = await store.get('global:active_exchanges') || [];
             res.json({ success: true, exchanges: oldExchanges, lastUpdated: 0 });
         }
-    } catch (err) {
+    } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
-});
+};
 
-// ─── Proxy - Extended Exchange (Starknet) ────────────────────────────────────
-app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(schemas.extendedEntryIdSchema, 'body'), async (req, res) => {
-    const errors = [];
+export const extended_stats_9 = async (req: CustomRequest, res: Response) => {
+    const errors: string[] = [];
     try {
         const entryId = req.validatedBody.entryId;
         
@@ -302,10 +258,10 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
         const BASE = process.env.EXTENDED_API_URL || 'https://api.starknet.extended.exchange/api/v1';
 
         // Get accountId dynamically (cached in-memory)
-        let accountId;
+        let accountId: string;
         try {
             accountId = await getExtendedAccountId(BASE, headers, apiKey);
-        } catch (err) {
+        } catch (err: any) {
             logger.error('Extended accountId retrieval failed:', err.message);
             return res.status(400).json({ error: `Failed to initialize Extended Exchange: ${err.message}` });
         }
@@ -352,8 +308,8 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
         let totalIn = 0, totalOut = 0;
         const freshOperations = operationsRes.data?.data || [];
 
-        const freshDeposits = freshOperations.filter(op => op.type === 'DEPOSIT' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
-        const freshWithdrawals = freshOperations.filter(op => op.type === 'WITHDRAWAL' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
+        const freshDeposits = freshOperations.filter((op: any) => op.type === 'DEPOSIT' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
+        const freshWithdrawals = freshOperations.filter((op: any) => op.type === 'WITHDRAWAL' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
 
         for (const op of freshDeposits) {
             totalIn += Math.abs(parseFloat(op.amount || 0));
@@ -370,7 +326,7 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
         // Calculate VOLUME from cached trades and orders
         let volumeFromTrades = 0;
         const cachedTrades = cached.trades || [];
-        for (const t of cachedTrades) {
+        for (const t of cachedTrades as any[]) {
             const val = Math.abs(parseFloat(t.value) || 0);
             if (val !== 0) {
                 volumeFromTrades += val;
@@ -381,7 +337,7 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
 
         let volumeFromOrders = 0;
         const cachedOrders = cached.orders || [];
-        for (const o of cachedOrders) {
+        for (const o of cachedOrders as any[]) {
             if (o.status === 'FILLED' || o.status === 'PARTIALLY_FILLED') {
                 const fq = Math.abs(parseFloat(o.filledQty) || 0);
                 const ap = Math.abs(parseFloat(o.averagePrice) || 0);
@@ -390,12 +346,12 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
                 }
             }
         }
-        const finalVolume = Math.max(volumeFromTrades, volumeFromOrders);
+        let finalVolume = Math.max(volumeFromTrades, volumeFromOrders);
 
         // Calculate WIN_RATE from cached historical closed positions
         let wins = 0, totalClosed = 0;
         const cachedPositions = cached.positions || [];
-        for (const p of cachedPositions) {
+        for (const p of cachedPositions as any[]) {
             if (p.realisedPnl !== undefined) {
                 totalClosed++;
                 if (parseFloat(p.realisedPnl || 0) > 0) wins++;
@@ -460,76 +416,13 @@ app.post('/api/exchanges/extended/stats', apiLimiter, csrfProtect, validate(sche
                 cached_last_sync: cached.lastSync
             }
         });
-    } catch (error) {
+    } catch (error: any) {
         logger.error('Extended Stats Error:', error.stack || error.message);
         res.status(500).json({ error: 'Failed to fetch Extended exchange data. Please try again.' });
     }
-});
-
-// Incremental sync helper for Extended Starknet API
-const fetchAllExtendedPaginated = async (BASE, endpoint, cachedList = [], getUniqueId, isTerminalFn, headers) => {
-    let all = [];
-    const seen = new Set();
-    const terminalCacheIds = new Set(
-        cachedList
-            .filter(item => !isTerminalFn || isTerminalFn(item))
-            .map(item => getUniqueId(item))
-    );
-    let cursor = null;
-    let hitTerminalCache = false;
-    const fetchStartTime = Date.now();
-
-    for (let i = 0; i < 100; i++) {
-        // Strict safety time limit for Vercel functions (8.5 seconds)
-        if (Date.now() - fetchStartTime > 8500) {
-            logger.warn(`Extended sync time limit reached for ${endpoint}`);
-            break;
-        }
-        try {
-            let url = `${BASE}${endpoint}${endpoint.includes('?') ? '&' : '?'}limit=100`;
-            if (cursor) url += `&cursor=${cursor}`;
-            const r = await http.get(url, { headers });
-            const records = r.data?.data || [];
-            let added = 0;
-
-            for (const rec of (Array.isArray(records) ? records : [])) {
-                const id = getUniqueId(rec);
-                if (terminalCacheIds.has(id)) {
-                    hitTerminalCache = true;
-                }
-                if (!seen.has(id)) {
-                    seen.add(id);
-                    all.push(rec);
-                    added++;
-                }
-            }
-
-            if (hitTerminalCache) {
-                break; // Met a terminal record in cache - incremental sync complete!
-            }
-
-            const next = r.data?.pagination?.cursor;
-            if (added === 0 || !next) break;
-            cursor = next;
-        } catch (e) {
-            logger.error(`Extended pagination error [${endpoint}]:`, e.message);
-            break;
-        }
-    }
-
-    // Merge and deduplicate
-    const mergedMap = new Map();
-    for (const item of cachedList) {
-        mergedMap.set(getUniqueId(item), item);
-    }
-    for (const item of all) {
-        mergedMap.set(getUniqueId(item), item);
-    }
-    return Array.from(mergedMap.values());
 };
 
-// ─── Incremental History Sync - Extended Exchange ────────────────────────────
-app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, validate(schemas.extendedEntryIdSchema, 'body'), async (req, res) => {
+export const extended_sync_history_10 = async (req: CustomRequest, res: Response) => {
     try {
         const entryId = req.validatedBody.entryId;
 
@@ -548,10 +441,10 @@ app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, valida
         const BASE = process.env.EXTENDED_API_URL || 'https://api.starknet.extended.exchange/api/v1';
 
         // Get accountId dynamically (cached in-memory)
-        let accountId;
+        let accountId: string;
         try {
             accountId = await getExtendedAccountId(BASE, headers, apiKey);
-        } catch (err) {
+        } catch (err: any) {
             logger.error('Extended sync accountId retrieval failed:', err.message);
             return res.status(400).json({ error: `Failed to initialize Extended Exchange sync: ${err.message}` });
         }
@@ -570,14 +463,14 @@ app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, valida
 
         // Fetch paginated history in parallel using incremental matching and explicit accountId
         const [trades, rawOperations, positions, orders] = await Promise.all([
-            fetchAllExtendedPaginated(BASE, `/user/trades?accountId=${accountId}&startTime=0`, cached.trades, t => t.id || JSON.stringify(t), () => true, headers),
-            fetchAllExtendedPaginated(BASE, `/user/asset-operations?accountId=${accountId}&startTime=0`, [], op => op.id || JSON.stringify(op), () => true, headers),
-            fetchAllExtendedPaginated(BASE, `/user/positions/history?accountId=${accountId}&startTime=0`, cached.positions, p => p.id || JSON.stringify(p), () => true, headers),
-            fetchAllExtendedPaginated(BASE, `/user/orders/history?accountId=${accountId}&startTime=0`, cached.orders, o => o.id || JSON.stringify(o), o => ['FILLED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(o.status), headers)
+            fetchAllExtendedPaginated(BASE, `/user/trades?accountId=${accountId}&startTime=0`, cached.trades, (t: any) => t.id || JSON.stringify(t), () => true, headers),
+            fetchAllExtendedPaginated(BASE, `/user/asset-operations?accountId=${accountId}&startTime=0`, [], (op: any) => op.id || JSON.stringify(op), () => true, headers),
+            fetchAllExtendedPaginated(BASE, `/user/positions/history?accountId=${accountId}&startTime=0`, cached.positions, (p: any) => p.id || JSON.stringify(p), () => true, headers),
+            fetchAllExtendedPaginated(BASE, `/user/orders/history?accountId=${accountId}&startTime=0`, cached.orders, (o: any) => o.id || JSON.stringify(o), (o: any) => ['FILLED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(o.status), headers)
         ]);
 
-        const deposits = rawOperations.filter(op => op.type === 'DEPOSIT' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
-        const withdrawals = rawOperations.filter(op => op.type === 'WITHDRAWAL' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
+        const deposits = rawOperations.filter((op: any) => op.type === 'DEPOSIT' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
+        const withdrawals = rawOperations.filter((op: any) => op.type === 'WITHDRAWAL' && (op.status === 'COMPLETED' || op.status === 'SUCCESS'));
 
         // Save updated data to cache
         await store.set(cacheKey, {
@@ -591,17 +484,15 @@ app.post('/api/exchanges/extended/sync-history', apiLimiter, csrfProtect, valida
 
         logger.info(`Completed history sync for Extended: ${entryId}`);
         res.json({ success: true });
-    } catch (e) {
+    } catch (e: any) {
         logger.error('Extended history sync failed:', e.message);
         res.status(500).json({ error: 'History sync failed' });
     }
-});
+};
 
-
-// ─── Proxy - Nado Exchange (Ink L2) ─────────────────────────────────────────
-app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, validate(schemas.nadoStatsSchema, 'body'), async (req, res) => {
+export const nado_stats_11 = async (req: CustomRequest, res: Response) => {
     try {
-        const { address, walletAddress } = req.validatedBody;
+        const { address, walletAddress, entryId } = req.validatedBody;
         const targetAddress = walletAddress || address;
 
         const archiveHeaders = {
@@ -679,7 +570,7 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, validate(schemas.
         const perpProducts = subRes.data?.data?.perp_products || subRes.data?.perp_products || [];
         for (const pb of perpBalances) {
             const pid = pb.product_id;
-            const product = perpProducts.find(p => p.product_id === pid);
+            const product = perpProducts.find((p: any) => p.product_id === pid);
             if (product) {
                 const amount = parseFloat(pb.balance?.amount || pb.amount || 0) / 1e18;
                 const vQuote = parseFloat(pb.balance?.v_quote_balance || pb.v_quote_balance || 0) / 1e18;
@@ -693,7 +584,7 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, validate(schemas.
 
         // Calculate Win Rate & realized PNL from cached historical orders
         const cachedOrders = cached.orders || [];
-        for (const o of cachedOrders) {
+        for (const o of cachedOrders as any[]) {
             const rpnl = (parseFloat(o.realized_pnl) || 0) / 1e18;
             const fee  = (parseFloat(o.fee) || 0) / 1e18;
             pnlFromTrades += (rpnl - fee);
@@ -765,16 +656,15 @@ app.post('/api/exchanges/nado/stats', apiLimiter, csrfProtect, validate(schemas.
                 cached_last_sync: cached.lastSync
             }
         });
-    } catch (error) {
+    } catch (error: any) {
         logger.error('Nado Proxy Error:', error.message);
         res.status(500).json({ error: 'Failed to fetch Nado exchange data. Please try again.' });
     }
-});
+};
 
-// ─── Incremental History Sync - Nado Exchange ────────────────────────────────
-app.post('/api/exchanges/nado/sync-history', apiLimiter, csrfProtect, validate(schemas.nadoSyncSchema, 'body'), async (req, res) => {
+export const nado_sync_history_12 = async (req: CustomRequest, res: Response) => {
     try {
-        const { address, walletAddress } = req.validatedBody;
+        const { address, walletAddress, entryId } = req.validatedBody;
         const targetAddress = walletAddress || address;
 
         const archiveHeaders = {
@@ -795,15 +685,15 @@ app.post('/api/exchanges/nado/sync-history', apiLimiter, csrfProtect, validate(s
 
         logger.info(`Starting incremental history sync for Nado: ${targetAddress}`);
 
-        let allOrders = [], cursor = null, hasMore = true;
-        const cacheIds = new Set(cached.orders.map(o => o.idx || JSON.stringify(o)));
+        let allOrders: any[] = [], cursor = null, hasMore = true;
+        const cacheIds = new Set(cached.orders.map((o: any) => o.idx || JSON.stringify(o)));
         let hitCache = false;
         const startTime = Date.now();
 
         for (let i = 0; i < 200; i++) {
             // Strict 8.5 seconds serverless time budget limit
             if (!hasMore || (Date.now() - startTime > 8500)) break;
-            const pld = { orders: { subaccounts: [sender], limit: 100 } };
+            const pld: any = { orders: { subaccounts: [sender], limit: 100 } };
             if (cursor) pld.orders.idx = cursor;
             
             const archiveUrl = process.env.NADO_ARCHIVE_URL || 'https://archive.prod.nado.xyz/v1';
@@ -846,25 +736,23 @@ app.post('/api/exchanges/nado/sync-history', apiLimiter, csrfProtect, validate(s
 
         logger.info(`Completed history sync for Nado: ${targetAddress}`);
         res.json({ success: true });
-    } catch (e) {
+    } catch (e: any) {
         logger.error('Nado history sync failed:', e.message);
         res.status(500).json({ error: 'Nado history sync failed' });
     }
-});
+};
 
-
-// ─── Proxy - Variational Exchange (Arbitrum) ─────────────────────────────────
-app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(schemas.variationalStatsSchema, 'body'), async (req, res) => {
+export const variational_stats_13 = async (req: CustomRequest, res: Response) => {
     try {
         // walletAddress allows multi-wallet support
-        const { address, walletAddress } = req.validatedBody;
+        const { address, walletAddress, entryId } = req.validatedBody;
         const targetAddress = walletAddress || address;
 
         const OMNI_API = process.env.VARIATIONAL_API_URL || 'https://omni.variational.io/api';
         const OMNI_PUB = process.env.VARIATIONAL_PUB_URL || 'https://omni-client-api.prod.ap-northeast-1.variational.io';
 
         // Forward the vr-token session cookie from the browser (or body) to Omni API
-        let vrToken = await store.get(`vault:variational:${entryId}`);
+        let vrToken: string = await store.get(`vault:variational:${entryId}`);
         if (!vrToken) {
             vrToken = req.body.vrToken || req.cookies?.[`vr_token_${entryId}`] || req.cookies?.['vr-token'];
         }
@@ -883,8 +771,8 @@ app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(s
         let responseData = {
             stats: statsRes.data,
             nextDropTs: dropRes.data.next_drop_ts,
-            portfolio: null,
-            points: null
+            portfolio: null as any, referralCode: null as any,
+            points: null as any
         };
 
         // Manual override for user requested wallet
@@ -904,12 +792,12 @@ app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(s
         }
 
         if (vrToken) {
-            logger.info(`[Variational] Fetching user data for ${logger.maskAddress(targetAddress)}`);
+            logger.info(`[Variational] Fetching user data for ${(logger as any).maskAddress(targetAddress)}`);
             const [portfolioRes, pointsRes, tradesRes, referralsRes] = await Promise.all([
-                // ACT_DEPOSIT: /portfolio/summary → sum_balance (Total Equity)
+                // ACT_DEPOSIT: /portfolio/summary ΓåÆ sum_balance (Total Equity)
                 http.get(`${OMNI_API}/portfolio/summary`, { headers: authHeaders })
                     .catch(e => { logger.error('Variational portfolio:', e.message); return null; }),
-                // POINTS + RANK: /points/summary → total_points, rank
+                // POINTS + RANK: /points/summary ΓåÆ total_points, rank
                 http.get(`${OMNI_API}/points/summary`, { headers: authHeaders })
                     .catch(e => { logger.error('Variational points:', e.message); return null; }),
                 // INIT_DEPOSIT: /portfolio/trades filtered by DEPOSIT/WITHDRAWAL type
@@ -917,7 +805,7 @@ app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(s
                 // Falls back to sum_balance - sum_upnl if trades endpoint fails.
                 http.get(`${OMNI_API}/portfolio/trades`, { headers: authHeaders, params: { limit: 1000, order_by: 'created_at', order: 'desc' } })
                     .catch(e => { logger.error('Variational trades:', e.message); return null; }),
-                // VOLUME: /referrals/summary → trade_volume.current (user's all-time trade volume)
+                // VOLUME: /referrals/summary ΓåÆ trade_volume.current (user's all-time trade volume)
                 http.get(`${OMNI_API}/referrals/summary`, { headers: authHeaders })
                     .catch(e => { logger.error('Variational referrals:', e.message); return null; })
             ]);
@@ -935,7 +823,7 @@ app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(s
                 if (tradesRes?.data?.result) {
                     const tradeList = tradesRes.data.result || [];
                     // Look for deposit/withdrawal type records
-                    const deposits = tradeList.filter(t => t.type === 'DEPOSIT' || t.clearing_status === 'SETTLED');
+                    const deposits = tradeList.filter((t: any) => t.type === 'DEPOSIT' || t.clearing_status === 'SETTLED');
                     if (deposits.length > 0) {
                         // Has transfer records - compute net
                         for (const t of tradeList) {
@@ -1005,20 +893,8 @@ app.post('/api/exchanges/variational/stats', apiLimiter, csrfProtect, validate(s
 
 
         res.json(responseData);
-    } catch (error) {
+    } catch (error: any) {
         logger.error('Variational Proxy Error:', error.message);
         res.status(500).json({ error: 'Failed to fetch Variational exchange data. Please try again.' });
     }
-});
-
-
-// Start Server (only listen if not running as a Vercel serverless function)
-if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
-    app.listen(PORT, () => {
-        logger.info(`🚀 TradeDash Server running at http://localhost:${PORT}`);
-        logger.info(`Serving frontend from: ${path.join(__dirname, '../public')}`);
-    });
-}
-
-// Export for Vercel serverless
-module.exports = app;
+};

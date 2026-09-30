@@ -15,7 +15,7 @@ const apiLimiter = rateLimit({
             if (client) {
                 return client.call(args[0], ...args.slice(1)) as Promise<RedisReply>;
             }
-            throw new Error('Redis not connected');
+            return Promise.reject(new Error('Redis not connected'));
         }
     })
 });

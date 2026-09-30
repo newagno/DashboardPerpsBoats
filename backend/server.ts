@@ -7,6 +7,7 @@ import logger from './utils/logger';
 import store from './utils/store';
 
 const app = express();
+app.set('trust proxy', 1); // Trust Vercel proxy for rate-limiting
 const PORT = process.env.PORT || 3000;
 
 // ── Initialize Cache ──
